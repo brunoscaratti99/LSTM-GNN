@@ -40,7 +40,7 @@ def create_sliding_windows(
 
     for i in range(m + 1):
         X_windows.append(X[i : i + window_size])
-        y_windows.append(y[i + window_size + horizon - 1])
+        y_windows.append(y[i + window_size:i + window_size + horizon])
 
     return np.array(X_windows), np.array(y_windows)
 
