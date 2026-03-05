@@ -45,4 +45,20 @@ def create_sliding_windows(
     return np.array(X_windows), np.array(y_windows)
 
 
+def train_split(Xs, ys, train_ratio=0.7, val_ratio=0.2):
+    test_ratio = 1-train_ratio-val_ratio
+    num_samples = Xs.shape[0]
+    n_train = int(train_ratio * num_samples)
+    n_val   = int(val_ratio * num_samples)
+    
+    
+    X_train, y_train = Xs[:n_train], ys[:n_train]
+    X_val  , y_val   = Xs[n_train:n_train+n_val], ys[n_train:n_train+n_val]
+    X_test , y_test  = Xs[n_train+n_val:], ys[n_train+n_val:]
+    
+    return X_train, y_train, X_val, y_val, X_test, y_test
+
+
+    
+    
 
