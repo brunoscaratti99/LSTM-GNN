@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
+import os
+import re
 
 
 def _parse_lr_token(token):
@@ -20,6 +22,27 @@ def _parse_lr_token(token):
         return None
 
 
+def create_next_experiment_folder(base_path):
+    os.makedirs(base_path, exist_ok=True)
+    
+    existing = [
+        d for d in os.listdir(base_path)
+        if os.path.isdir(os.path.join(base_path, d)) and d.startswith("exp_")
+    ]
+    
+    numbers = []
+    for folder in existing:
+        match = re.match(r"exp_(\d+)", folder)
+        if match:
+            numbers.append(int(match.group(1)))
+            
+    next_number = max(numbers)+1 if numbers else 1
+    new_folder_name = f"exp_{next_number:03d}"
+    
+    full_path = os.path.join(base_path, new_folder_name)
+    os.makedirs(full_path)
+    
+    return full_path
 
 
 def plot_por_hiperparametro_train_val(
@@ -576,3 +599,28 @@ def analisar_experimentos(
     plt.tight_layout(rect=[0, 0, 1, 0.90])
 
     return runs_df, tabela_runs, tabela_exp, (fig, axes)
+
+
+
+def save_error_plots(path, train_mse, val_mse, train_mae, val_mae, train_r2, val_r2):
+    metrics = [
+        ("mse", train_mse, val_mse, "MSE"),
+        ("mae", train_mae, val_mae, "MAE"),
+        ("r2", train_r2, val_r2, "R2"),
+    ]
+
+    for metric_name, train_values, val_values, y_label in metrics:
+        plt.figure(figsize=(12, 6))
+        if len(train_values) > 0:
+            plt.plot(train_values, label="train", linewidth=2)
+        if len(val_values) > 0:
+            plt.plot(val_values, label="val", linewidth=2)
+
+        plt.xlabel("Epoch")
+        plt.ylabel(y_label)
+        plt.title(f"{y_label} by epoch")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(path, f"{metric_name}_curve.png"), dpi=150)
+        plt.close()

@@ -25,3 +25,9 @@ def normalize_features(X, scaler=MinMaxScaler()):
         scalers.append(scale)
     return torch.cat(torch.tensor(X_scaled), dim=-1), scalers
         
+
+def assert_finite(name, tensor):
+    if not torch.isfinite(tensor).all():
+        nan_count = torch.isnan(tensor).sum().item()
+        inf_count = torch.isinf(tensor).sum().item()
+        raise RuntimeError(f"{name} has non-finite values (nan={nan_count}, inf={inf_count})")
