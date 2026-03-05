@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 
 def create_sliding_windows(
@@ -42,7 +43,7 @@ def create_sliding_windows(
         X_windows.append(X[i : i + window_size])
         y_windows.append(y[i + window_size:i + window_size + horizon])
 
-    return np.array(X_windows), np.array(y_windows)
+    return torch.tensor(X_windows), torch.tensor(y_windows)
 
 
 def train_split(Xs, ys, train_ratio=0.7, val_ratio=0.2):
