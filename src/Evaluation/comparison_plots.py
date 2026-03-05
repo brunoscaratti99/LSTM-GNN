@@ -18,6 +18,10 @@ def _parse_lr_token(token):
         return float(t)
     except ValueError:
         return None
+
+
+
+
 def plot_por_hiperparametro_train_val(
     runs_df,
     param="hidden_dim",
