@@ -30,20 +30,20 @@ def create_sliding_windows(
     X_windows : ndarray of shape (n_windows, window_size, n_features)
     y_windows : ndarray of shape (n_windows,) or (n_windows, horizon)
     """
-
+    n_samples, n_features = X.shape[0], X.shape[2]
     if multi_step:
         print("Multi-step not implemented yet")
         return None
 
     X_windows, y_windows = [], []
 
-    m = len(X) - (window_size + horizon)
+    m = n_samples - (window_size + horizon)
 
     for i in range(m + 1):
         X_windows.append(X[i : i + window_size])
         y_windows.append(y[i + window_size:i + window_size + horizon])
 
-    return torch.tensor(X_windows), torch.tensor(y_windows)
+    return torch.stack(X_windows, dim=-1), torch.stack(y_windows, dim=-1)
 
 
 def train_split(Xs, ys, train_ratio=0.7, val_ratio=0.2):

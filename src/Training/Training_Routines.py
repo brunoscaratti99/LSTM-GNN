@@ -6,6 +6,15 @@ import copy
 import time 
 import json
 from pathlib import Path
+import sys
+
+sys.path.append("../src")
+
+
+
+from Evaluation.metrics import safe_r2, safe_mape
+from Evaluation.comparison_plots import save_error_plots
+from Data.preprocessing import assert_finite
 
 loss_fn = nn.MSELoss()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'

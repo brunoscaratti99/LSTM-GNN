@@ -20,9 +20,11 @@ def adjacency_matrix(N_local, edge_index, edge_weight=None):
 
 
 
-def knn_topology(pos, stations, k=4):
+def knn_topology(stations, k=4):
     i = 0
     N = len(stations)
+    pos = {}
+    
     coords = np.zeros((N,2))
     for name in stations.keys():
         pos[i]    = float(stations[name][1]), float(stations[name][0])
