@@ -91,8 +91,8 @@ def era5_uv_to_tensor(
     stations,
     start=None,
     end=None,
-    u_var="u10",
-    v_var="v10",
+    u_var="u",
+    v_var="v",
     daily_agg="mean",
     convention="meteorological",
     return_xarray=False,
@@ -425,4 +425,4 @@ def tensor_data_precip(data, t1, t2, stations):
     lon_da = xr.DataArray(lon_stations, dims='station')
     
     tp_stations = tp_daily.sel(latitude=lat_da, longitude=lon_da, method='nearest').transpose('station', 'datetime')
-    return tp_stations.values.permute(1,0)
+    return torch.tensor(tp_stations.values).permute(1,0)
