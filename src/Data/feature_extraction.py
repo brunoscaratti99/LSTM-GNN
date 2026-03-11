@@ -2,6 +2,55 @@ import xarray as xr
 import pandas as pd
 import torch
 import numpy as np
+import time
+
+
+def change_comma(frame):
+  new_frame = frame.copy()
+  for col in frame.columns:
+    new_frame[col] = frame[col].astype(str)
+    new_frame[col] = frame[col].str.replace(',','.',regex=False)
+  return new_frame
+
+
+def total_precipitation(data, lat, lon, time):
+    """
+    Calcula a precipitação total no dia time, na latitude e longitude dadas
+    """
+    soma = 0
+    inicio_1 = pd.to_datetime(time)-pd.to_timedelta(pd.Timedelta(hours=6))
+    inicio_2 = pd.to_datetime(time)+pd.to_timedelta(pd.Timedelta(hours=6))
+    inicio_3 = pd.to_datetime(time)+pd.to_timedelta(pd.Timedelta(hours=18))
+    soma += data.tp.sel(latitude=lat, longitude=lon, time=inicio_1, method='nearest').values[5:].sum()
+    soma += data.tp.sel(latitude=lat, longitude=lon, time=inicio_2, method='nearest').values.sum()
+    soma += data.tp.sel(latitude=lat, longitude=lon, time=inicio_3, method='nearest').values[:5].sum()
+    return soma
+
+def tensor_data(t1, t2, era, stations_RS):
+    N = len(stations_RS)
+    T = pd.to_datetime(t2)-pd.to_datetime(t1)
+    T = T.days+1
+    X = torch.zeros((T,N,1))
+    i = 0
+    for station in stations_RS.keys():
+        start = time.time()
+        lat, lon = stations_RS[station][0], stations_RS[station][1]
+        for t in range(T): 
+            X[t,i,0] = torch.tensor(total_precipitation(data=era, lat=lat, lon=lon, time=pd.to_datetime(t1)+pd.Timedelta(days=t)))
+
+        i += 1
+
+    return X
+
+
+def get_data(dataset,lat,lon,t1, t2):
+    date_sequence = pd.date_range(start=t1, end=t2,freq="D")
+    rg_rea = pd.DataFrame({
+        'time': pd.to_datetime(date_sequence),
+        'tp'  : [total_precipitation(data=dataset,lat=lat,lon=lon,time=pd.to_datetime(t1)+pd.Timedelta(days=i)) for i in range(len(date_sequence))]
+    })
+    rg_rea.set_index('time')
+    return rg_rea
 
 def _wrap_lon(lon, ds_lons):
     # Ajusta longitude para 0..360 ou -180..180 conforme o dataset
@@ -246,3 +295,119 @@ def get_wind_uv(t1, t2, ds_daily, stations, levels=(500, 850), level_coord=None)
         X[:, i, 10:12] = torch.tensor(s.v_max.values,  dtype=torch.float32)
 
     return X
+
+
+
+
+
+def era5_daily_precip(data, lat, lon):
+
+    # seleciona ponto
+    tp = data.tp.sel(latitude=lat, longitude=lon, method="nearest")
+
+    # cria tempo real da previsão
+    valid_time = tp.time + tp.step
+
+    # atribui nova coordenada temporal
+    tp = tp.assign_coords(valid_time=(("time","step"), valid_time))
+
+    # transforma (time,step) -> time único
+    tp_hourly = tp.stack(datetime=("time","step"))
+    tp_hourly = tp_hourly.assign_coords(datetime=tp_hourly.valid_time)
+    tp_hourly = tp_hourly.swap_dims({"datetime":"datetime"})
+    tp_hourly = tp_hourly.sortby("datetime")
+
+    # remove duplicatas se existirem
+    tp_hourly = tp_hourly.groupby("datetime").last()
+
+    # precipitação diária
+    tp_daily = tp_hourly.resample(datetime="1D").sum()
+
+    return tp_daily
+
+
+
+def station_dictionary(catalogo, UF='RS'):
+    latlon = {}
+    catalogo = change_comma(catalogo)
+    if UF=='ALL':
+        for name in catalogo.DC_NOME:
+            aux_df = catalogo.loc[catalogo['DC_NOME']==name]
+            latlon[name] = [aux_df.VL_LATITUDE.values[0], aux_df.VL_LONGITUDE.values[0]]
+        return latlon
+    else:
+        catalogo = catalogo.loc[catalogo['SG_ESTADO']==UF]
+        for name in catalogo.DC_NOME:
+            aux_df = catalogo.loc[catalogo['DC_NOME']==name]
+            latlon[name] = [aux_df.VL_LATITUDE.values[0],aux_df.VL_LONGITUDE.values[0]]
+    return latlon
+
+
+
+def station_era(era, inmet, lat, lon):
+    latlon = era.sel(latitude=lat, longitude=lon, method='nearest')
+    return latlon
+
+def tensor_data_old(t1, t2, era, stations_RS):
+    N = len(stations_RS)
+    T = pd.to_datetime(t2)-pd.to_datetime(t1)
+    T = T.days+1
+    X = torch.zeros((T,N,1))
+    i = 0
+    for station in stations_RS.keys():
+        start = time.time()
+        lat, lon = stations_RS[station][0], stations_RS[station][1]
+        for t in range(T): 
+            X[t,i,0] = torch.tensor(total_precipitation(data=era, lat=lat, lon=lon, time=pd.to_datetime(t1)+pd.Timedelta(days=t)))
+
+        i += 1
+
+    return X
+
+
+
+
+def era5_daily_precip_all(data):
+
+    tp = data.tp
+
+    # tempo válido (time + step)
+    valid_time = tp.time + tp.step
+
+    # adicionar coordenada corretamente
+    tp = tp.assign_coords(
+        valid_time=(("time", "step"), valid_time.data)
+    )
+
+    # transformar (time, step) em uma dimensão única
+    tp = tp.stack(datetime=("time", "step"))
+
+    # usar valid_time como dimensão temporal
+    tp = tp.assign_coords(datetime=tp.valid_time.data)
+    tp = tp.swap_dims({"datetime": "datetime"})
+    tp = tp.sortby("datetime")
+
+    # remover duplicatas
+    tp = tp.groupby("datetime").last()
+
+    # precipitação diária
+    tp_daily = tp.resample(datetime="1D").sum()
+
+    # converter m → mm
+    tp_daily = tp_daily * 1000
+
+    return tp_daily
+
+
+
+def tensor_data_precip(data, t1, t2, stations):
+    tp_daily = era5_daily_precip_all(data).sel(datetime=slice(t1, t2))
+    lat_stations, lon_stations = [], []
+    for name in stations.keys():
+        lat_stations.append(float(stations[name][0]))
+        lon_stations.append(float(stations[name][1]))
+    lat_da = xr.DataArray(lat_stations, dims='station')
+    lon_da = xr.DataArray(lon_stations, dims='station')
+    
+    tp_stations = tp_daily.sel(latitude=lat_da, longitude=lon_da, method='nearest').transpose('station', 'datetime')
+    return tp_stations.values.permute(1,0)
