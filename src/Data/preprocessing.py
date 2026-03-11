@@ -11,13 +11,14 @@ def normalize_tp(tp, eps=1e-6):
     return (tp_log - mean) / (std + eps), mean, std
 
 
-def normalize_features(X, scaler=MinMaxScaler()):
-    # X: [T, N, F]
-    T, N, F = X.shape
+def normalize_features(X, scaler=MinMaxScaler):
+    # X: [B, T, N, F]
+    #normaliza todas features com excessão do target ([...,0] de X)
+    B, T, N, F = X.shape
     X_scaled = []
     scalers = {}
     
-    for f in range(F):
+    for f in range(1,F):
         scale = scaler()
         scale.fit(X[...,f].flatten().numpy())
         x_scaled = scale.transform(X[...,f])
