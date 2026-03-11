@@ -5,6 +5,10 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
+import sys
+sys.path.append("../src")
+
+from Data.feature_extraction import haversine_km
 
 
 def adjacency_matrix(N, edge_index, edge_weight=None, symmetric=True):
@@ -81,8 +85,27 @@ def plot_graph(N, edge_index, pos):
             font_weight='bold')
     nx.draw_networkx_labels(G, pos, font_color='black')
     plt.show()
-    
 
+def distance_graph(stations, criterion=120):
+    N = len(stations)
+    E_1, E_2 = [], []
+    edge_weight = []
+    pos = []
+    for i, name in enumerate(stations.keys()):
+        pos.append([float(stations[name][1]), float(stations[name][0])])
+        lat_i, lon_i = float(stations[name][1]), float(stations[name][0])
+        for j, name_2 in enumerate(stations.keys()):
+            if i!=j:
+                lat_j, lon_j = float(stations[name_2][1]), float(stations[name_2][0])
+                dist = haversine_km(lat_i, lon_i, lat_j, lon_j)
+                if dist<=criterion:
+                    E_1.append(i)
+                    E_2.append(j)
+                    E_2.append(i)
+                    E_1.append(j)
+                    edge_weight.append(dist)
+                    edge_weight.append(dist)
+    return torch.tensor([E_1, E_2], dtype=torch.int), pos, edge_weight
 
 """
 graph_data = Data(x=torch.zeros(62), edge_index=edge_index_knn)
