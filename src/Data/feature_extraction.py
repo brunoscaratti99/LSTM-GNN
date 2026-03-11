@@ -3,6 +3,93 @@ import pandas as pd
 import torch
 import numpy as np
 
+def _wrap_lon(lon, ds_lons):
+    # Ajusta longitude para 0..360 ou -180..180 conforme o dataset
+    lon = float(lon)
+    lmin = float(ds_lons.min())
+    lmax = float(ds_lons.max())
+    if lmax > 180 and lon < 0:
+        lon = lon + 360
+    elif lmin < 0 and lon > 180:
+        lon = lon - 360
+    return lon
+
+def uv_to_dir_speed(u, v, convention="meteorological"):
+    # u: leste+, v: norte+
+    speed = np.hypot(u, v)
+    if convention == "meteorological":
+        # direção "de onde vem" (0=N, 90=E)
+        direction = (np.degrees(np.arctan2(-u, -v)) + 360) % 360
+    else:
+        # direção "para onde vai"
+        direction = (np.degrees(np.arctan2(u, v)) + 360) % 360
+    return direction, speed
+
+def era5_uv_to_tensor(
+    nc_path,
+    stations,
+    start=None,
+    end=None,
+    u_var="u10",
+    v_var="v10",
+    daily_agg="mean",
+    convention="meteorological",
+    return_xarray=False,
+):
+    """
+    stations: dict {name: (lat, lon)} ou DataFrame com colunas ['name','lat','lon']
+    retorna: torch.Tensor [days, n_estacoes, 2] (direção, velocidade)
+    """
+    ds = xr.open_dataset(nc_path)
+
+    # resolve estações
+    if isinstance(stations, dict):
+        names = list(stations.keys())
+        lats = [stations[k][0] for k in names]
+        lons = [stations[k][1] for k in names]
+    else:
+        names = stations["name"].tolist()
+        lats = stations["lat"].tolist()
+        lons = stations["lon"].tolist()
+
+    # recorte de tempo
+    if start is not None or end is not None:
+        ds = ds.sel(time=slice(start, end))
+
+    # agrega diário
+    if daily_agg == "mean":
+        ds_day = ds.resample(time="1D").mean()
+    elif daily_agg == "sum":
+        ds_day = ds.resample(time="1D").sum()
+    else:
+        raise ValueError("daily_agg deve ser 'mean' ou 'sum'")
+
+    # coleta por estação
+    series = []
+    for lat, lon in zip(lats, lons):
+        lon = _wrap_lon(lon, ds_day.longitude)
+        point = ds_day[[u_var, v_var]].sel(
+            latitude=lat, longitude=lon, method="nearest"
+        )
+        u = point[u_var].values
+        v = point[v_var].values
+        direction, speed = uv_to_dir_speed(u, v, convention=convention)
+        # [days, 2]
+        series.append(np.stack([direction, speed], axis=-1))
+
+    # [days, n_estacoes, 2]
+    X = np.stack(series, axis=1)
+
+    if return_xarray:
+        days = pd.to_datetime(ds_day.time.values)
+        return xr.DataArray(
+            X,
+            dims=("day", "station", "feature"),
+            coords={"day": days, "station": names, "feature": ["direction", "speed"]},
+        )
+
+    return torch.tensor(X, dtype=torch.float32)
+
 
 
 

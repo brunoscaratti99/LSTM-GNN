@@ -8,6 +8,38 @@ import torch
 import matplotlib.pyplot as plt
 import os
 import re
+import xarray as xr
+
+def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=None):
+    """
+    Plota mapa de calor de uma matriz NxN.
+    Aceita numpy array, lista de listas ou tensor do PyTorch.
+    Retorna (fig, ax).
+    """
+    if hasattr(M, "detach"):  # torch.Tensor
+        M = M.detach().cpu().numpy()
+    else:
+        M = np.asarray(M)
+
+    if M.ndim != 2 or M.shape[0] != M.shape[1]:
+        raise ValueError(f"A matriz deve ser NxN. Recebido shape={M.shape}")
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(M, cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Valor")
+
+    ax.set_title(title)
+    ax.set_xlabel("Nó j")
+    ax.set_ylabel("Nó i")
+    ax.set_xticks(range(M.shape[1]))
+    ax.set_yticks(range(M.shape[0]))
+
+    plt.tight_layout()
+    plt.show()
+    return fig, ax
+
+
 
 
 def _parse_lr_token(token):
@@ -20,6 +52,8 @@ def _parse_lr_token(token):
         return float(t)
     except ValueError:
         return None
+    
+
 
 
 def create_next_experiment_folder(base_path):

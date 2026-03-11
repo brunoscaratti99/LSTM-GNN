@@ -39,11 +39,11 @@ def create_sliding_windows(
 
     m = n_samples - (window_size + horizon)
 
-    for i in range(m + 1):
+    for i in range(m+1):
         X_windows.append(X[i : i + window_size])
         y_windows.append(y[i + window_size:i + window_size + horizon])
 
-    return torch.stack(X_windows, dim=-1), torch.stack(y_windows, dim=-1)
+    return torch.stack(X_windows, dim=-1).permute(3,0,1,2), torch.stack(y_windows, dim=-1).permute(2,0,1)
 
 
 def train_split(Xs, ys, train_ratio=0.7, val_ratio=0.2):

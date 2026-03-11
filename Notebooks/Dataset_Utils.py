@@ -155,43 +155,8 @@ def station_dictionary(catalogo, UF='RS'):
             latlon[name] = [aux_df.VL_LATITUDE.values[0],aux_df.VL_LONGITUDE.values[0]]
     return latlon
 
-#================================================================
-#================================================================
-#================================================================
+
 
 def station_era(era, inmet, lat, lon):
     latlon = era.sel(latitude=lat, longitude=lon, method='nearest')
     return latlon
-
-#================================================================
-#================================================================
-#================================================================
-
-def split_sequence(sequence, sequence2, n_steps_in, lead_time):
-    X, y = [], []
-    m = len(sequence)-lead_time
-    for i in range(m):
-        end_ix = i+n_steps_in
-        
-        if end_ix>m:
-            break
-        seq_x, seq_y = sequence[i:end_ix,0:], sequence2[end_ix+lead_time-1]
-        X.append(seq_x)
-        y.append(seq_y)
-    return np.array(X), np.array(y)
-
-#================================================================
-#================================================================
-#================================================================
-
-def prepare_data(X, y, num_features):
-    dim_1                        = X.shape[0]
-    dim_2                        = X.shape[1]
-    dim_y                        = y.shape[0]
-    
-    X                            = X.flatten()
-    y                            = y.flatten()
-    
-    X                            = X.reshape((dim_1, dim_2, num_features))
-    y                            = y.reshape((dim_y, 1, 1))
-    return X,y 

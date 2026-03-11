@@ -7,17 +7,38 @@ from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 
 
-def adjacency_matrix(N_local, edge_index, edge_weight=None):
-    A = torch.eye(N_local, device=edge_index.device)
+def adjacency_matrix(N, edge_index, edge_weight=None, symmetric=True):
+    A = torch.zeros(N, N, device=edge_index.device)
     if edge_weight is None:
         edge_weight = torch.ones(edge_index.shape[1], device=edge_index.device)
-    for i in range(0, len(edge_index[0]), 2):
-        u, v = edge_index[0][i], edge_index[0][i + 1]
-        A[u, v] = edge_weight[i]
-        A[v, u] = edge_weight[i]
+
+    src, dst = edge_index  # edge_index[0] e edge_index[1]
+    A[src, dst] = edge_weight
+
+    if symmetric:
+        A[dst, src] = edge_weight
+
+    A.fill_diagonal_(1.0)
+
     return A
 
+def graph_matrix_index(A, threshold=1e-6, directed=False, include_self=False):
+    # A: [N, N]
+    N = A.shape[0]
+    mask = A.abs() > threshold
 
+    if not include_self:
+        mask = mask & ~torch.eye(N, dtype=torch.bool, device=A.device)
+
+    idx = mask.nonzero(as_tuple=False)  # [E, 2] com pares (i,j)
+
+    if not directed:
+        # mantém só triângulo superior e espelha -> evita duplicatas
+        idx = idx[idx[:, 0] < idx[:, 1]]
+        idx = torch.cat([idx, idx[:, [1, 0]]], dim=0)
+
+    edge_index = idx.t().contiguous().long()  # [2, E]
+    return edge_index
 
 
 def knn_topology(stations, k=4):
