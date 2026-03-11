@@ -56,29 +56,6 @@ def _parse_lr_token(token):
 
 
 
-def create_next_experiment_folder(base_path):
-    os.makedirs(base_path, exist_ok=True)
-    
-    existing = [
-        d for d in os.listdir(base_path)
-        if os.path.isdir(os.path.join(base_path, d)) and d.startswith("exp_")
-    ]
-    
-    numbers = []
-    for folder in existing:
-        match = re.match(r"exp_(\d+)", folder)
-        if match:
-            numbers.append(int(match.group(1)))
-            
-    next_number = max(numbers)+1 if numbers else 1
-    new_folder_name = f"exp_{next_number:03d}"
-    
-    full_path = os.path.join(base_path, new_folder_name)
-    os.makedirs(full_path)
-    
-    return full_path
-
-
 def plot_por_hiperparametro_train_val(
     runs_df,
     param="hidden_dim",
@@ -658,3 +635,19 @@ def save_error_plots(path, train_mse, val_mse, train_mae, val_mae, train_r2, val
         plt.tight_layout()
         plt.savefig(os.path.join(path, f"{metric_name}_curve.png"), dpi=150)
         plt.close()
+        
+        
+def model_weights_hist(model):
+    fig, axs = plt.subplots(1,3, figsize=(12,3))
+    i = 1
+    for name, param in model.named_parameters():
+        axs[i-1].hist(param.detach().cpu().flatten(), bins=100)
+        axs[i-1].set_title(name)
+        axs[i-1].set_xlim(-1e0, 1e0)
+        if i%3==0:
+            plt.tight_layout()
+            plt.show()
+            fig, axs = plt.subplots(1,3, figsize=(12,3))
+            i = 1
+        else:
+            i += 1
