@@ -651,3 +651,84 @@ def model_weights_hist(model):
             i = 1
         else:
             i += 1
+            
+            
+            
+
+#funções de plots necessárias
+
+def plot_estacao_unica(y_real, y_pred, station_idx, start_date_plot, station_name=None):
+    """
+    y_real, y_pred: tensores [T, N] (escala física, ex: mm/dia)
+    station_idx: índice do nó/estação
+    start_date_plot: ex. "2025-01-01"
+    """
+    y_real_np = y_real[:, station_idx].detach().cpu().numpy()
+    y_pred_np = y_pred[:, station_idx].detach().cpu().numpy()
+    datas = pd.date_range(start=start_date_plot, periods=len(y_real_np), freq="D")
+
+    plt.figure(figsize=(12, 4))
+    plt.plot(datas, y_real_np, label="ERA5 real", linewidth=2)
+    plt.plot(datas, y_pred_np, label="Rede estimado", linewidth=2)
+    plt.title(f"Real vs Previsto - nó {station_idx}" if station_name is None else f"Real vs Previsto - {station_name}")
+    plt.xlabel("Data")
+    plt.ylabel("Precipitação")
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+def prever_futuro_precip_todos_nos(
+    model,
+    X_hist_ready,              # [T_hist, N, F] já no mesmo pré-processamento do treino
+    horizon,                   # número de dias/passos futuros
+    train_period,              # mesmo train_period usado no treino
+    future_exog_ready=None,    # [horizon, N, F] (opcional). Se None, replica último passo
+    target_col=0,              # coluna da precipitação nas features
+    device=None,
+    inverse_transformer=None,  # ex: pt_x (PowerTransformer), opcional
+):
+    """
+    Retorna:
+      pred_scaled: [horizon, N] na escala do modelo
+      pred_real:   [horizon, N] em escala física (se inverse_transformer for fornecido), senão None
+    """
+    if device is None:
+        device = next(model.parameters()).device
+
+    model.eval()
+    n_in = model.cell.W_i.in_features
+    seq_len = train_period - 1
+
+    if X_hist_ready.ndim != 3:
+        raise ValueError("X_hist_ready deve ter shape [T_hist, N, F].")
+    if X_hist_ready.shape[0] < seq_len:
+        raise ValueError(f"Histórico insuficiente: precisa de pelo menos {seq_len} passos.")
+    if future_exog_ready is not None and future_exog_ready.shape[0] < horizon:
+        raise ValueError("future_exog_ready tem menos passos que horizon.")
+
+    X_hist_ready = X_hist_ready[:, :, :n_in].float().cpu()
+    if future_exog_ready is not None:
+        future_exog_ready = future_exog_ready[:, :, :n_in].float().cpu()
+
+    window = X_hist_ready[-seq_len:].clone()  # [seq_len, N, F]
+    preds = []
+
+    with torch.no_grad():
+        for h in range(horizon):
+            y_hat = model(window.unsqueeze(0).to(device)).squeeze(0).detach().cpu()  # [N]
+            preds.append(y_hat)
+            next_step = window[-1].clone() if future_exog_ready is None else future_exog_ready[h].clone()
+            next_step[:, target_col] = y_hat  # autoregressivo
+            window = torch.cat([window[1:], next_step.unsqueeze(0)], dim=0)
+
+    pred_scaled = torch.sack(preds, dim=0)  # [horizon, N]
+
+    pred_real = None
+    if inverse_transformer is not None:
+        arr = pred_scaled.numpy().reshape(-1, 1)
+        inv = inverse_transformer.inverse_transform(arr).reshape(pred_scaled.shape)
+        pred_real = torch.tensor(inv, dtype=torch.float32)
+
+    return pred_scaled, pred_real
