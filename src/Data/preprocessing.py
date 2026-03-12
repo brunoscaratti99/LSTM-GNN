@@ -47,4 +47,5 @@ def fit_log1p_zscore_stats(X_train_local, y_train_local, target_col=0, eps=1e-6)
 def apply_log1p_zscore(t, mean, std):
     return (torch.log1p(t.clamp_min(0.0)) - mean) / std
 
-
+def inverse_log1p_zscore(t, mean, std):
+    return (torch.expm1(t * std + mean))
