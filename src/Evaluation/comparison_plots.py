@@ -10,6 +10,19 @@ import os
 import re
 import xarray as xr
 
+
+def scatter_true_pred(y_true, y_pred, T_max=1, title="scatter plot"):
+    lims = [
+        min(y_true.min(), y_pred.min()),
+        max(y_true.max(). y_pred.max())
+    ]
+    
+    plt.plot(lims, lims, "k--", linewidth=1)
+    plt.xlim(lims)
+    plt.ylim(lims)
+    for t in range(T_max):
+        plt.scatter(y_true[t].reshape(-1,1), y_pred[t].reshape(-1,1),)
+
 def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=None):
     """
     Plota mapa de calor de uma matriz NxN.
