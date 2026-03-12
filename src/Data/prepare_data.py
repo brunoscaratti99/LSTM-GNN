@@ -1,8 +1,9 @@
 import numpy as np
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 
-def create_sliding_windows(
+def create_sliding_windows( 
     X,
     y,
     window_size,
@@ -61,5 +62,34 @@ def train_split(Xs, ys, train_ratio=0.7, val_ratio=0.2):
 
 
     
+def create_batchs(X_train, X_val, X_test, y_train, y_val, y_test, batch_size, device, num_workers=0):
+    pin_memory = (device=='cuda')
+    train_ds = TensorDataset(X_train,y_train)
+    val_ds   = TensorDataset(X_val, y_val)
+    test_ds  = TensorDataset(X_test, y_test)
     
+    train_loader = DataLoader(
+        train_ds, 
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+    
+    val_loader = DataLoader(
+        val_ds, 
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+     
+    test_loader = DataLoader(
+        test_ds, 
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+    return train_loader, val_loader, test_loader
 
