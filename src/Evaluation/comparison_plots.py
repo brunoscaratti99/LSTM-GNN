@@ -444,7 +444,8 @@ def plot_por_hiperparametro_train_val(
 
 
 def analisar_experimentos(
-    root=r"C:\Experiments",
+    root = os.path.join("..", "Experiments"),
+    #root=r"C:\Experiments",
     group_cols=("window_tag", "exp_id", "train_period", "hidden_dim", "lr", "weight_decay", "batch_size"),
     load_hist=True,
     smooth_window=1,

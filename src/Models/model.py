@@ -1,5 +1,5 @@
 import torch
-from Data_Library import adjacency_matrix
+from Graph.graph_related_utils import adjacency_matrix
 import torch.nn as nn
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
