@@ -18,6 +18,7 @@ class GLSTMCellBatch(nn.Module):
             self.edge_weight = edge_weight.to(edge_index.device) if torch.is_tensor(edge_weight) else torch.tensor(edge_weight, device=edge_index.device)
 
         A_init = adjacency_matrix(N, edge_index, self.edge_weight)
+        
         if learn_adj:
             self.A = nn.Parameter(A_init)
         else:
@@ -68,7 +69,7 @@ class GLSTMCellBatch(nn.Module):
 
 
 class GLSTMBatch(nn.Module):
-    def __init__(self, N, edge_index, in_channels, hidden_size, out_channels, lstm_layers=1, learn_adj=True):
+    def __init__(self, N, edge_index, in_channels, hidden_size, out_channels, lstm_layers=1, learn_adj=True, dropout=0.2):
         super().__init__()
         self.N = N
         self.lstm_layers = lstm_layers
@@ -81,7 +82,7 @@ class GLSTMBatch(nn.Module):
         
         #fully connected layer
         self.fc = nn.Sequential(
-            nn.Dropout(0.2),
+            nn.Dropout(dropout),
             nn.Linear(hidden_size, out_channels)
         ).to(device)
         
