@@ -1,0 +1,17 @@
+{
+  "hiddem_dim": 128,
+  "train_period": 30,
+  "device": "cuda",
+  "epochs_requested": 150,
+  "epochs_ran": 86,
+  "lr": 0.001,
+  "weight_decay": 0.0005,
+  "patience": 35,
+  "batch_size": 64,
+  "best_val_loss": 0.827830841143926,
+  "last_val_mse": 0.8350073993206024,
+  "last_val_mae": 0.737105131149292,
+  "last_val_mape": 125.82707901000977,
+  "last_val_r2": 0.03790783683458964,
+  "total_time_s": 1491.803773299791
+}
