@@ -21,13 +21,14 @@ from Data.preprocessing import assert_finite
 loss_fn = nn.MSELoss()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-def eval_with_loader(model, loader, use_amp, amp_device, amp_dtype):
+def eval_with_loader(model, loader, criterion, use_amp, amp_device, amp_dtype):
     model.eval()
     total_loss, total_mse, total_mae, total_mape, total_r2 = 0.0, 0.0, 0.0, 0.0, 0.0
     steps = 0
     mse_fn = nn.MSELoss()
     mae_fn = nn.L1Loss()
-
+    loss_fn = criterion if criterion is not None else nn.MSELoss()
+    
     with torch.no_grad():
         for batch_idx, (xb, yb) in enumerate(loader):
             xb = xb.to(device, non_blocking=True)
@@ -59,11 +60,13 @@ def eval_with_loader(model, loader, use_amp, amp_device, amp_dtype):
     }
 
 
-def train_batched_only(model, train_loader, val_loader, train_period, hidden_dim, epochs, lr, weight_decay, patience, run_dir=None):
+def train_batched_only(model, train_loader, val_loader, train_period, hidden_dim, epochs, lr, weight_decay, patience, criterion=None, run_dir=None):
     model = copy.deepcopy(model).to(device)
+    #print(criterion)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     mse_fn = nn.MSELoss()
     mae_fn = nn.L1Loss()
+    loss_fn = criterion if criterion is not None else nn.MSELoss()
 
     # Estável para debug: AMP desligado
     use_amp = False
@@ -133,7 +136,7 @@ def train_batched_only(model, train_loader, val_loader, train_period, hidden_dim
         history["train_mape"].append(train_mape / max(steps, 1))
         history["train_r2"].append(train_r2 / max(steps, 1))
 
-        val_metrics = eval_with_loader(model, val_loader, use_amp, amp_device, amp_dtype)
+        val_metrics = eval_with_loader(model, val_loader, criterion=criterion, use_amp=use_amp, amp_device=amp_device, amp_dtype=amp_dtype)
         history["val_loss"].append(val_metrics["loss"])
         history["val_mse"].append(val_metrics["mse"])
         history["val_mae"].append(val_metrics["mae"])
