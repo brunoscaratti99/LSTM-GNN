@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
+from torch_geometric.utils import to_undirected, coalesce
 import sys
 sys.path.append("../src")
 
@@ -64,11 +65,16 @@ def knn_topology(stations, k=4):
     
     for i in range(N):
         for j in indices[i][1:]:
+            if i == j:
+                continue
             E_1.append(i)
             E_2.append(j)
-            E_1.append(j)
-            E_2.append(i)
-    return torch.tensor([E_1,E_2], dtype=torch.int), pos
+
+    edge_index = torch.tensor([E_1, E_2], dtype=torch.long)
+    # garante bidirecional e remove duplicatas (evita grau inflado)
+    edge_index = to_undirected(edge_index, num_nodes=N)
+    edge_index, _ = coalesce(edge_index, None, num_nodes=N)
+    return edge_index, pos
     
 
 def plot_graph(N, edge_index, pos):
@@ -95,17 +101,18 @@ def distance_graph(stations, criterion=120):
         pos.append([float(stations[name][1]), float(stations[name][0])])
         lat_i, lon_i = float(stations[name][1]), float(stations[name][0])
         for j, name_2 in enumerate(stations.keys()):
-            if i!=j:
-                lat_j, lon_j = float(stations[name_2][1]), float(stations[name_2][0])
-                dist = haversine_km(lat_i, lon_i, lat_j, lon_j)
-                if dist<=criterion:
-                    E_1.append(i)
-                    E_2.append(j)
-                    E_2.append(i)
-                    E_1.append(j)
-                    edge_weight.append(dist)
-                    edge_weight.append(dist)
-    return torch.tensor([E_1, E_2], dtype=torch.int), pos, edge_weight
+            if i >= j:
+                continue
+            lat_j, lon_j = float(stations[name_2][1]), float(stations[name_2][0])
+            dist = haversine_km(lat_i, lon_i, lat_j, lon_j)
+            if dist<=criterion:
+                E_1.append(i)
+                E_2.append(j)
+                E_2.append(i)
+                E_1.append(j)
+                edge_weight.append(dist)
+                edge_weight.append(dist)
+    return torch.tensor([E_1, E_2], dtype=torch.long), pos, edge_weight
 
 """
 graph_data = Data(x=torch.zeros(62), edge_index=edge_index_knn)
