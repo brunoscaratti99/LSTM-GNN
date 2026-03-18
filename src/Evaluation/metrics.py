@@ -24,7 +24,7 @@ def weighted_mse_loss(
     y_true,
     extreme_quantile=0.9,
     extreme_weight=10.0,
-    is_log=False,
+    is_log=True,
     eps=1e-6
 ):
     """
