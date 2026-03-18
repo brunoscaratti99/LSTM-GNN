@@ -337,112 +337,6 @@ def plot_convergence_overlay(
     return fig, ax
 
 
-
-
-def plot_por_hiperparametro_train_val(
-    runs_df,
-    param="hidden_dim",
-    metric_base="mse",                  # "mse", "mae", "loss", "r2", ...
-    splits=("train", "val"),            # ("train","val") ou só ("train",) etc
-    group_cols=("exp_id", "lr"),
-    smooth_window=1,
-    show_individual=False,
-    min_runs_per_group=1,
-    ncols=2,
-    figsize_per_plot=(20,10),
-    sharey=False,
-):
-    if runs_df.empty:
-        raise ValueError("runs_df está vazio.")
-    if param not in runs_df.columns:
-        raise ValueError(f"Coluna '{param}' não existe.")
-    if "history" not in runs_df.columns:
-        raise ValueError("runs_df precisa da coluna 'history'.")
-
-    values = sorted(runs_df[param].dropna().unique())
-    nplots = len(values)
-    nrows = math.ceil(nplots / ncols)
-
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols,
-        figsize=(figsize_per_plot[0] * ncols, figsize_per_plot[1] * nrows),
-        sharey=sharey
-    )
-    axes = np.array(axes).reshape(-1)
-
-    valid_group_cols = [c for c in group_cols if c in runs_df.columns]
-    style_map = {"train": "--", "val": "-"}
-
-    for i, pval in enumerate(values):
-        ax = axes[i]
-        sub = runs_df[(runs_df[param] == pval) & runs_df["history"].notna()].copy()
-
-        if sub.empty:
-            ax.set_title(f"{param}={pval} (sem history)")
-            ax.grid(True, alpha=0.3)
-            continue
-
-        grouped = sub.groupby(valid_group_cols, dropna=False) if valid_group_cols else [(("all",), sub)]
-        cmap = plt.get_cmap("tab10")
-        gidx = 0
-
-        for gkey, gdf in grouped:
-            gkey = gkey if isinstance(gkey, tuple) else (gkey,)
-            color = cmap(gidx % 10)
-            gidx += 1
-
-            group_label = " | ".join([f"{c}={v}" for c, v in zip(valid_group_cols, gkey)]) if valid_group_cols else "all"
-
-            for split in splits:
-                hkey = f"{split}_{metric_base}"   # ex: train_mse, val_mse
-                seqs = []
-
-                for _, row in gdf.iterrows():
-                    vals = row["history"].get(hkey)
-                    if vals is None or len(vals) == 0:
-                        continue
-
-                    arr = np.asarray(vals, dtype=float)
-                    if smooth_window > 1:
-                        arr = pd.Series(arr).rolling(window=smooth_window, min_periods=1).mean().to_numpy()
-                    seqs.append(arr)
-
-                    if show_individual:
-                        ax.plot(np.arange(1, len(arr) + 1), arr, alpha=0.10, linewidth=1, color=color, linestyle=style_map.get(split, "-"))
-
-                if len(seqs) < min_runs_per_group:
-                    continue
-
-                max_len = max(len(s) for s in seqs)
-                M = np.full((len(seqs), max_len), np.nan)
-                for r, s in enumerate(seqs):
-                    M[r, :len(s)] = s
-
-                mean = np.nanmean(M, axis=0)
-                std = np.nanstd(M, axis=0)
-                x = np.arange(1, max_len + 1)
-
-                label = f"{group_label} | {split} (n={len(seqs)})"
-                line = ax.plot(x, mean, linewidth=2.2, color=color, linestyle=style_map.get(split, "-"), label=label)[0]
-                ax.fill_between(x, mean - std, mean + std, alpha=0.14, color=line.get_color())
-
-        ax.set_title(f"{param}={pval}")
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel(metric_base)
-        ax.grid(True, alpha=0.3)
-        ax.legend(loc='center left',
-                  bbox_to_anchor=(1.02,0.5), frameon=False)
-        #ax.legend(fontsize=8, loc="upper center", ncol=3)
-
-    for j in range(i + 1, len(axes)):
-        fig.delaxes(axes[j])
-
-    fig.suptitle(f"{metric_base} por {param} (train/val)", y=1.02)
-    plt.tight_layout()
-    return fig, axes
-
-
-
 def analisar_experimentos(
     root = os.path.join("..", "Experiments"),
     #root=r"C:\Experiments",
@@ -693,6 +587,119 @@ def plot_estacao_unica(y_real, y_pred, station_idx, start_date_plot, station_nam
     plt.show()
 
 
+def _flatten_unique_days(y, stride=1):
+    """
+    Remove dias sobrepostos entre batches.
+    Espera y com shape [batches, horizon, stations] (ou [batches, horizon]).
+    Retorna serie unica no tempo, sem repeticao de dias.
+    """
+    if hasattr(y, "detach"):
+        y = y.detach().cpu().numpy()
+    else:
+        y = np.asarray(y)
+
+    if y.ndim == 2:
+        y = y[:, :, None]  # [batches, horizon, 1]
+        squeeze_back = True
+    else:
+        squeeze_back = False
+
+    if y.ndim != 3:
+        raise ValueError(f"y deve ter 2 ou 3 dimensoes. Recebido shape={y.shape}")
+
+    batches, horizon, n_stations = y.shape
+    if batches == 0:
+        raise ValueError("y esta vazio.")
+    if stride < 1:
+        raise ValueError("stride deve ser >= 1.")
+
+    if stride >= horizon:
+        flat = y.reshape(batches * horizon, n_stations)
+    else:
+        parts = [y[0]]
+        if batches > 1:
+            tail = y[1:, -stride:, :].reshape(-1, n_stations)
+            parts.append(tail)
+        flat = np.concatenate(parts, axis=0)
+
+    if squeeze_back:
+        return flat[:, 0]
+    return flat
+
+
+def plot_precip_pred_vs_true(
+    y_pred,
+    y_true,
+    station_idx=0,
+    stride=1,
+    start_date=None,
+    station_name=None,
+    ax=None,
+    show=True,
+    title=None,
+):
+    """
+    Plota precipitacao predita vs real sem repetir dias.
+
+    Parametros
+    ----------
+    y_pred, y_true : [batches, horizon, stations] (ou [batches, horizon])
+        Exemplo: y_pred com shape [batchs, 5, 62].
+    station_idx : int ou None
+        Indice da estacao. Se None, plota a media das estacoes.
+    stride : int
+        Deslocamento entre batches. Para janelas deslizantes diarias, use 1.
+    start_date : str ou None
+        Data inicial (YYYY-MM-DD) para eixo x. Se None, usa indice.
+    """
+    y_pred_flat = _flatten_unique_days(y_pred, stride=stride)
+    y_true_flat = _flatten_unique_days(y_true, stride=stride)
+
+    if y_pred_flat.shape[0] != y_true_flat.shape[0]:
+        raise ValueError(
+            f"Tamanho temporal diferente: pred={y_pred_flat.shape[0]} vs true={y_true_flat.shape[0]}"
+        )
+
+    if y_pred_flat.ndim == 1:
+        pred_series = y_pred_flat
+        true_series = y_true_flat
+        label = "serie"
+    else:
+        if station_idx is None:
+            pred_series = y_pred_flat.mean(axis=1)
+            true_series = y_true_flat.mean(axis=1)
+            label = "media_estacoes"
+        else:
+            pred_series = y_pred_flat[:, station_idx]
+            true_series = y_true_flat[:, station_idx]
+            label = f"estacao {station_idx}" if station_name is None else station_name
+
+    if start_date is not None:
+        x = pd.date_range(start=start_date, periods=len(true_series), freq="D")
+        xlabel = "Data"
+    else:
+        x = np.arange(len(true_series))
+        xlabel = "Dia"
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(12, 4))
+    else:
+        fig = ax.figure
+
+    ax.plot(x, true_series, label="real", linewidth=2)
+    ax.plot(x, pred_series, label="predito", linewidth=2)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("Precipitacao")
+    ax.set_title(title or f"Precipitacao real vs predita - {label}")
+    ax.grid(alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+
+    return fig, ax
+
 def prever_futuro_precip_todos_nos(
     model,
     X_hist_ready,              # [T_hist, N, F] já no mesmo pré-processamento do treino
@@ -746,3 +753,111 @@ def prever_futuro_precip_todos_nos(
         pred_real = torch.tensor(inv, dtype=torch.float32)
 
     return pred_scaled, pred_real
+
+
+
+import math
+def plot_por_hiperparametro_train_val_lstm_glstm(
+    runs_df,
+    param="hidden_dim",
+    metric_base="mse",                  # "mse", "mae", "loss", "r2", ...
+    splits=("train", "val"),            # ("train","val") ou só ("train",) etc
+    group_cols=("exp_id", "lr"),
+    smooth_window=1,
+    show_individual=False,
+    min_runs_per_group=1,
+    ncols=2,
+    figsize_per_plot=(20,10),
+    sharey=False,
+):
+    if runs_df.empty:
+        raise ValueError("runs_df está vazio.")
+    if param not in runs_df.columns:
+        raise ValueError(f"Coluna '{param}' não existe.")
+    if "history" not in runs_df.columns:
+        raise ValueError("runs_df precisa da coluna 'history'.")
+
+    values = sorted(runs_df[param].dropna().unique())
+    nplots = len(values)
+    nrows = math.ceil(nplots / ncols)
+
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=ncols,
+        figsize=(figsize_per_plot[0] * ncols, figsize_per_plot[1] * nrows),
+        sharey=sharey
+    )
+    axes = np.array(axes).reshape(-1)
+
+    valid_group_cols = [c for c in group_cols if c in runs_df.columns]
+    style_map = {"train": "--", "val": "-"}
+
+    for i, pval in enumerate(values):
+        ax = axes[i]
+        sub = runs_df[(runs_df[param] == pval) & runs_df["history"].notna()].copy()
+
+        if sub.empty:
+            ax.set_title(f"{param}={pval} (sem history)")
+            ax.grid(True, alpha=0.3)
+            continue
+
+        grouped = sub.groupby(valid_group_cols, dropna=False) if valid_group_cols else [(("all",), sub)]
+        cmap = plt.get_cmap("tab10")
+        gidx = 0
+
+        for gkey, gdf in grouped:
+            gkey = gkey if isinstance(gkey, tuple) else (gkey,)
+            color = cmap(gidx % 10)
+            gidx += 1
+
+            group_label = " | ".join([f"{c}={v}" for c, v in zip(valid_group_cols, gkey)]) if valid_group_cols else "all"
+
+            for split in splits:
+                hkey = f"{split}_{metric_base}"   # ex: train_mse, val_mse
+                seqs = []
+
+                for _, row in gdf.iterrows():
+                    vals = row["history"].get(hkey)
+                    if vals is None or len(vals) == 0:
+                        continue
+
+                    arr = np.asarray(vals, dtype=float)
+                    if smooth_window > 1:
+                        arr = pd.Series(arr).rolling(window=smooth_window, min_periods=1).mean().to_numpy()
+                    seqs.append(arr)
+
+                    if show_individual:
+                        ax.plot(np.arange(1, len(arr) + 1), arr, alpha=0.10, linewidth=1, color=color, linestyle=style_map.get(split, "-"))
+
+                if len(seqs) < min_runs_per_group:
+                    continue
+
+                max_len = max(len(s) for s in seqs)
+                M = np.full((len(seqs), max_len), np.nan)
+                for r, s in enumerate(seqs):
+                    M[r, :len(s)] = s
+
+                mean = np.nanmean(M, axis=0)
+                std = np.nanstd(M, axis=0)
+                x = np.arange(1, max_len + 1)
+
+                label = f"{group_label} | {split} (n={len(seqs)})"
+                line = ax.plot(x, mean, linewidth=2.2, color=color, linestyle=style_map.get(split, "-"), label=label)[0]
+                ax.fill_between(x, mean - std, mean + std, alpha=0.14, color=line.get_color())
+
+        ax.set_title(f"{param}={pval}")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(metric_base)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='center left',
+                  bbox_to_anchor=(1.02,0.5), frameon=False)
+        #ax.legend(fontsize=8, loc="upper center", ncol=3)
+
+    for j in range(i + 1, len(axes)):
+        fig.delaxes(axes[j])
+
+    fig.suptitle(f"{metric_base} por {param} (train/val)", y=1.02)
+    plt.tight_layout()
+    return fig, axes
+
+
+
