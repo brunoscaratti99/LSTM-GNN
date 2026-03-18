@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 from torch.utils.data import TensorDataset, DataLoader
+from dateutil.relativedelta import relativedelta
+import xarray as xr
 
 
 def create_sliding_windows( 
@@ -93,3 +95,54 @@ def create_batchs(X_train, X_val, X_test, y_train, y_val, y_test, batch_size, de
     )
     return train_loader, val_loader, test_loader
 
+def slice_intervalos_anuais(dataset: xr.Dataset, 
+                            start_date: np.datetime64, end_date: np.datetime64, 
+                            months: int, days: int):
+
+    """
+    Para cada ano entre "start_date" e "end_date", 
+    pegua apenas o periodo de "months" meses e "days" dias antes de "end_date", e os concatena
+    """
+
+
+
+    yearly_delta = end_date - (end_date - relativedelta(months = months, days = days))
+    yearly_delta = yearly_delta.days
+
+    print(yearly_delta)
+
+    if yearly_delta > 364:
+        raise ValueError("Cannot slice intervals bigger than a year within a year!")
+    if yearly_delta < 1:
+        raise ValueError("Cannot slice intervals of less than a day!")
+    if months < 0 or days < 0:
+        raise ValueError("Cannot have negative months or days values!")
+
+    # Encontra o numero de anos que serao usados
+    years = np.datetime64(end_date, "Y") - np.datetime64(start_date, "Y")
+
+    # Vets aux
+    start = []
+    end = []
+
+    # Calcula os intervalos de um mes pra cada ano
+    for year in range(int(years)):
+        start.append(np.datetime64(end_date) - relativedelta(years = year, months = 1, days = 0, hours = 0))
+        end.append(np.datetime64(end_date) - relativedelta(years = year, months = 0, days = 0, hours = 0))
+
+    # Coloca em um zip pro python gostar
+    ranges = list(zip(start, end))
+
+    #for start, end in ranges:
+    #    print(start, end)
+
+    # Faz varios slices do banco original e concatena-os todos
+    dataset = xr.concat(
+        [dataset.sel(time = slice(start, end)) for start, end in ranges],
+        dim = "time"
+    )
+
+    # Da sort dnv, por algum motivo algo do slicing desordena os dados
+    dataset = dataset.sortby("time")
+
+    return(dataset)
