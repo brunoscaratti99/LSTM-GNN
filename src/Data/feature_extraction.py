@@ -174,7 +174,7 @@ def daily_vertical_velocity(ds, var_name, percentiles=[10]):
 
 def get_vv(t1, t2, ds, stations):
     N_local = len(stations)
-    T = (pd.to_datetime(t2) - pd.to_datetime(t1)).days + 1
+    T = ds.time.values.shape[0]
     X = torch.zeros((T, N_local, 12), dtype=torch.float32)
     da = ds.sel(time=slice(t1, t2))
 
@@ -208,6 +208,24 @@ def daily_temp_features(ds, day_shift_hours=0):
     return out
 
 
+def daily_specific_humidity_features(ds, var_name="q", day_shift_hours=0):
+    """
+    Gera estatísticas diárias (max, mean, min) de specific humidity a partir de dados horários.
+    Retorna xr.Dataset com variáveis:
+      - q_max, q_mean, q_min
+    """
+    if day_shift_hours != 0:
+        ds = ds.assign_coords(time=ds.time + np.timedelta64(day_shift_hours, "h"))
+
+    q = ds[var_name]
+    out = xr.Dataset({
+        "q_max":  q.resample(time="1D").max(),
+        "q_mean": q.resample(time="1D").mean(),
+        "q_min":  q.resample(time="1D").min(),
+    })
+    return out
+
+
 def get_temp(t1, t2, ds_daily, stations):
     """
     retorna tensor [T, N, 6] com medidas de 
@@ -219,13 +237,16 @@ def get_temp(t1, t2, ds_daily, stations):
     min d2m
     """
     N = len(stations)
-    T = (pd.to_datetime(t2) - pd.to_datetime(t1)).days + 1
+    #T = (pd.to_datetime(t2) - pd.to_datetime(t1)).days + 1
+    #T = torch.tensor(ds_daily.t2m_mean.values, dtype=torch.float32).shape[0]
+    T = ds_daily.time.values.shape[0]
     X = torch.zeros((T, N, 6), dtype=torch.float32)
     da = ds_daily.sel(time=slice(t1, t2))
 
     for i, st in enumerate(stations.keys()):
         lat, lon = stations[st][0], stations[st][1]
         s = da.sel(latitude=lat, longitude=lon, method="nearest")
+        #print(torch.tensor(s.t2m_mean.values, dtype=torch.float32).shape)
         X[:, i, 0] = torch.tensor(s.t2m_mean.values, dtype=torch.float32)
         X[:, i, 1] = torch.tensor(s.t2m_min.values,  dtype=torch.float32)
         X[:, i, 2] = torch.tensor(s.t2m_max.values,  dtype=torch.float32)
@@ -233,6 +254,50 @@ def get_temp(t1, t2, ds_daily, stations):
         X[:, i, 4] = torch.tensor(s.d2m_min.values,  dtype=torch.float32)
         X[:, i, 5] = torch.tensor(s.d2m_max.values,  dtype=torch.float32)
     return X
+
+
+def get_specific_humidity(t1, t2, ds_daily, stations):
+    """
+    Retorna tensor [T, N, 3] com specific humidity diário por estação.
+    Ordem dos canais: [max, mean, min]
+    """
+    lat_name = _infer_coord_name(ds_daily, ["latitude", "lat"])
+    lon_name = _infer_coord_name(ds_daily, ["longitude", "lon"])
+
+    N = len(stations)
+    T = (pd.to_datetime(t2) - pd.to_datetime(t1)).days + 1
+    X = torch.zeros((T, N, 6), dtype=torch.float32)
+
+    ds = ds_daily.sel(time=slice(t1, t2))
+
+    for i, st in enumerate(stations.keys()):
+        lat, lon = stations[st][0], stations[st][1]
+        lon = _wrap_lon(lon, ds[lon_name])
+        s = ds.sel({lat_name: lat, lon_name: lon}, method="nearest")
+
+        X[:, i, 0:2] = torch.tensor(s.q_max.values,  dtype=torch.float32)
+        X[:, i, 2:4] = torch.tensor(s.q_mean.values, dtype=torch.float32)
+        X[:, i, 4:6] = torch.tensor(s.q_min.values,  dtype=torch.float32)
+
+    return X
+
+
+def era5_specific_humidity_tensor(nc_path, stations, start=None, end=None, var_name="q", day_shift_hours=0):
+    """
+    Lê ERA5 de specific humidity horário e retorna tensor diário [T, N, 3]
+    com canais [max, mean, min].
+    """
+    ds = xr.open_dataset(nc_path)
+    if start is not None or end is not None:
+        ds = ds.sel(time=slice(start, end))
+
+    ds_daily = daily_specific_humidity_features(ds, var_name=var_name, day_shift_hours=day_shift_hours)
+    if start is None:
+        start = str(pd.to_datetime(ds_daily.time.values[0]).date())
+    if end is None:
+        end = str(pd.to_datetime(ds_daily.time.values[-1]).date())
+
+    return get_specific_humidity(start, end, ds_daily, stations)
 
 
 
@@ -312,30 +377,43 @@ def get_wind_uv(t1, t2, ds_daily, stations, levels=(500, 850), level_coord=None)
 
 
 
-def era5_daily_precip(data, lat, lon):
+def forecast_steps_to_daily_precip(data, var_name="tp", lat=None, lon=None, to_mm=False):
+    """
+    Converte precipitação prevista em (time, step) para precipitação diária
+    usando o tempo válido `time + step`.
 
-    # seleciona ponto
-    tp = data.tp.sel(latitude=lat, longitude=lon, method="nearest")
+    Exemplo:
+    - time: 06h e 18h
+    - step: 1..12 horas
 
-    # cria tempo real da previsão
+    Cada previsão é reposicionada no seu horário real e depois somada por dia.
+    """
+    tp = data[var_name] if isinstance(data, xr.Dataset) else data
+
+    if lat is not None and lon is not None:
+        tp = tp.sel(latitude=lat, longitude=lon, method="nearest")
+
+    if "time" not in tp.dims or "step" not in tp.dims:
+        raise ValueError("A precipitação precisa ter dimensões 'time' e 'step'.")
+
     valid_time = tp.time + tp.step
+    tp = tp.assign_coords(valid_time=(("time", "step"), valid_time.data))
 
-    # atribui nova coordenada temporal
-    tp = tp.assign_coords(valid_time=(("time","step"), valid_time))
+    tp_hourly = tp.stack(sample=("time", "step")).reset_index("sample", drop=True)
+    tp_hourly = tp_hourly.assign_coords(time=("sample", tp_hourly.valid_time.data))
+    tp_hourly = tp_hourly.swap_dims({"sample": "time"}).sortby("time")
+    tp_hourly = tp_hourly.drop_vars("valid_time").groupby("time").last()
 
-    # transforma (time,step) -> time único
-    tp_hourly = tp.stack(datetime=("time","step"))
-    tp_hourly = tp_hourly.assign_coords(datetime=tp_hourly.valid_time)
-    tp_hourly = tp_hourly.swap_dims({"datetime":"datetime"})
-    tp_hourly = tp_hourly.sortby("datetime")
+    tp_daily = tp_hourly.resample(time="1D").sum()
 
-    # remove duplicatas se existirem
-    tp_hourly = tp_hourly.groupby("datetime").last()
+    if to_mm:
+        tp_daily = tp_daily * 1000
 
-    # precipitação diária
-    tp_daily = tp_hourly.resample(datetime="1D").sum()
+    return tp_daily.to_dataset(name=var_name)
 
-    return tp_daily
+
+def era5_daily_precip(data, lat, lon):
+    return forecast_steps_to_daily_precip(data, lat=lat, lon=lon)
 
 def day_index(dataset, start_date, index):
     real_date = pd.to_datetime(start_date)+pd.Timedelta(days=index)
@@ -383,46 +461,34 @@ def tensor_data_old(t1, t2, era, stations_RS):
 
 
 def era5_daily_precip_all(data):
+    return forecast_steps_to_daily_precip(data, to_mm=True)
 
-    tp = data.tp
 
-    # tempo válido (time + step)
-    valid_time = tp.time + tp.step
+def daily_precip_dataset_to_tensor(tp_daily, stations, var_name="tp"):
+    """
+    Converte um dataset diário de precipitação em grade para tensor [dias, N],
+    onde N é o número de estações/nós em `stations`.
+    """
+    da = tp_daily[var_name] if isinstance(tp_daily, xr.Dataset) else tp_daily
 
-    # adicionar coordenada corretamente
-    tp = tp.assign_coords(
-        valid_time=(("time", "step"), valid_time.data)
-    )
+    if "time" not in da.dims:
+        raise ValueError("O dataset diário precisa ter a dimensão 'time'.")
 
-    # transformar (time, step) em uma dimensão única
-    tp = tp.stack(datetime=("time", "step"))
+    lat_name = _infer_coord_name(da, ["latitude", "lat"])
+    lon_name = _infer_coord_name(da, ["longitude", "lon"])
 
-    # usar valid_time como dimensão temporal
-    tp = tp.assign_coords(datetime=tp.valid_time.data)
-    tp = tp.swap_dims({"datetime": "datetime"})
-    tp = tp.sortby("datetime")
+    station_names = list(stations.keys())
+    lat_stations = [float(stations[name][0]) for name in station_names]
+    lon_stations = [_wrap_lon(float(stations[name][1]), da[lon_name]) for name in station_names]
 
-    # remover duplicatas
-    tp = tp.groupby("datetime").last()
+    lat_da = xr.DataArray(lat_stations, dims="station", coords={"station": station_names})
+    lon_da = xr.DataArray(lon_stations, dims="station", coords={"station": station_names})
 
-    # precipitação diária
-    tp_daily = tp.resample(datetime="1D").sum()
-
-    # converter m → mm
-    tp_daily = tp_daily * 1000
-
-    return tp_daily
+    tp_stations = da.sel({lat_name: lat_da, lon_name: lon_da}, method="nearest").transpose("time", "station")
+    return torch.tensor(tp_stations.values, dtype=torch.float32)
 
 
 
 def tensor_data_precip(data, t1, t2, stations):
-    tp_daily = era5_daily_precip_all(data).sel(datetime=slice(t1, t2))
-    lat_stations, lon_stations = [], []
-    for name in stations.keys():
-        lat_stations.append(float(stations[name][0]))
-        lon_stations.append(float(stations[name][1]))
-    lat_da = xr.DataArray(lat_stations, dims='station')
-    lon_da = xr.DataArray(lon_stations, dims='station')
-    
-    tp_stations = tp_daily.sel(latitude=lat_da, longitude=lon_da, method='nearest').transpose('station', 'datetime')
-    return torch.tensor(tp_stations.values).permute(1,0)
+    tp_daily = era5_daily_precip_all(data).sel(time=slice(t1, t2))
+    return daily_precip_dataset_to_tensor(tp_daily, stations)
