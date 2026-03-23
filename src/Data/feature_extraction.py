@@ -4,6 +4,30 @@ import torch
 import numpy as np
 import time
 from math import radians, cos, sin, asin, sqrt
+import os
+
+def smart_load_dataset(path:str, variable:str):
+    """
+    Made to load a era5 dataset independently of the specific date range at the end of the name.
+    Instead this function loads it based on variable name.
+    """
+
+    # List all files in dir
+    dir_files = os.listdir(path)
+
+    # Loop through them
+    for file in dir_files:
+        # If the varible string is in the name of one of the files
+        if variable in file:
+            # Get the full path to it
+            current_dir = os.getcwd()
+            full_path = os.path.join(current_dir, path, file)
+            # Load it and return it
+            return(xr.open_dataset(full_path))
+        
+    # If no files are found with this variable name, the user has made a value error
+    raise(ValueError("".join(["A dataset of variable ", variable, " does not exist in path ", path])))
+
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -154,22 +178,38 @@ def era5_uv_to_tensor(
 
 
 
-def daily_vertical_velocity(ds, var_name, percentiles=[10]):
-    da = ds[var_name]
-    daily_mean = da.resample(time="1D").mean()
-    daily_min = da.resample(time="1D").min()
-    daily_max = da.resample(time="1D").max()
-    q = [p / 100 for p in percentiles]
-    daily_percentiles = da.resample(time="1D").quantile(q)
 
-    data_vars = {
-        f"{var_name}_mean": daily_mean,
-        f"{var_name}_min": daily_min,
-        f"{var_name}_max": daily_max,
-    }
-    for i, p in enumerate(percentiles):
-        data_vars[f"{var_name}_p{p}"] = daily_percentiles.isel(quantile=i)
-    return xr.Dataset(data_vars)
+def daily_vertical_velocity(ds, var_name, percentiles=(10,), time_chunk_days=30, load_into_memory=True):
+    da = ds[var_name]
+
+    # Se ainda não estiver chunkado, divide o tempo em blocos (~30 dias)
+    if getattr(da.data, "chunks", None) is None:
+        try:
+            da = da.chunk({"time": 24 * time_chunk_days})
+        except Exception:
+            pass
+
+    resampler = da.resample(time="1D")
+
+    out = xr.Dataset({
+        f"{var_name}_mean": resampler.mean(),
+        f"{var_name}_min": resampler.min(),
+        f"{var_name}_max": resampler.max(),
+    })
+
+    if percentiles:
+        q = np.asarray(percentiles, dtype=np.float64) / 100.0
+        daily_percentiles = resampler.quantile(q)
+
+        for i, p in enumerate(percentiles):
+            p_label = str(int(p)) if float(p).is_integer() else str(p).replace(".", "_")
+            out[f"{var_name}_p{p_label}"] = daily_percentiles.isel(quantile=i).astype(da.dtype)
+
+        out = out.drop_vars("quantile", errors="ignore")
+
+    return out.load() if load_into_memory else out
+
+
 
 
 def get_vv(t1, t2, ds, stations):
