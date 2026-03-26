@@ -233,8 +233,10 @@ class GLSTM_v2(nn.Module):
         ])
 
         self.fc = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.Softplus(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, out_channels),
+            nn.Linear(hidden_size // 2, self.window)
         )
 
     def reset_parameters(self):
