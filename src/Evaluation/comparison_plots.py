@@ -23,7 +23,7 @@ def scatter_true_pred(y_true, y_pred, T_max=1, title="scatter plot"):
     for t in range(T_max):
         plt.scatter(y_true[t].reshape(-1,1), y_pred[t].reshape(-1,1),)
 
-def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=None):
+def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=None, figsize=(10,10)):
     """
     Plota mapa de calor de uma matriz NxN.
     Aceita numpy array, lista de listas ou tensor do PyTorch.
@@ -37,7 +37,7 @@ def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=No
     if M.ndim != 2 or M.shape[0] != M.shape[1]:
         raise ValueError(f"A matriz deve ser NxN. Recebido shape={M.shape}")
 
-    fig, ax = plt.subplots(figsize=(7, 6))
+    fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(M, cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Valor")
@@ -67,6 +67,111 @@ def _parse_lr_token(token):
         return None
     
 
+def _create_axes_with_right_legend_space(
+    nrows,
+    ncols,
+    figsize,
+    sharey=False,
+    legend_width_ratio=0.45,
+):
+    width_ratios = []
+    for _ in range(ncols):
+        width_ratios.extend([1.0, legend_width_ratio])
+
+    fig = plt.figure(figsize=figsize)
+    grid = fig.add_gridspec(nrows=nrows, ncols=ncols * 2, width_ratios=width_ratios)
+
+    plot_axes = []
+    legend_axes = []
+    shared_ax = None
+
+    for idx in range(nrows * ncols):
+        row, col = divmod(idx, ncols)
+        plot_ax = fig.add_subplot(
+            grid[row, col * 2],
+            sharey=shared_ax if sharey and shared_ax is not None else None,
+        )
+        if shared_ax is None:
+            shared_ax = plot_ax
+
+        legend_ax = fig.add_subplot(grid[row, col * 2 + 1])
+        legend_ax.axis("off")
+
+        plot_axes.append(plot_ax)
+        legend_axes.append(legend_ax)
+
+    return fig, np.array(plot_axes), np.array(legend_axes)
+
+
+def _figure_size_with_right_legend_space(figsize_per_plot, ncols, nrows, legend_width_ratio=0.45):
+    plot_width, plot_height = figsize_per_plot
+    total_width = plot_width * (1.0 + legend_width_ratio) * ncols
+    total_height = plot_height * nrows
+    return (total_width, total_height)
+
+
+def _draw_legend_on_right_panel(ax, legend_ax, fontsize=8):
+    handles, labels = ax.get_legend_handles_labels()
+    legend_ax.axis("off")
+
+    if not handles:
+        return
+
+    legend_ax.legend(
+        handles,
+        labels,
+        loc="center left",
+        fontsize=fontsize,
+        frameon=False,
+    )
+
+
+def _apply_ylim(ax, ylim):
+    if ylim is None:
+        return
+    if not isinstance(ylim, (tuple, list)) or len(ylim) != 2:
+        raise ValueError("ylim deve ser uma tupla/lista no formato (ymin, ymax).")
+    ax.set_ylim(ylim[0], ylim[1])
+
+
+def _collect_unique_legend_entries(axes):
+    handles = []
+    labels = []
+    seen_labels = set()
+
+    for ax in np.atleast_1d(axes).flat:
+        ax_handles, ax_labels = ax.get_legend_handles_labels()
+        for handle, label in zip(ax_handles, ax_labels):
+            if not label or label in seen_labels:
+                continue
+            seen_labels.add(label)
+            handles.append(handle)
+            labels.append(label)
+
+    return handles, labels
+
+
+def _place_shared_legend_above_axes(fig, axes, fontsize=8, max_cols=3, top_padding=0.02):
+    handles, labels = _collect_unique_legend_entries(axes)
+    if not handles:
+        fig.tight_layout()
+        return None
+
+    legend = fig.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.995),
+        ncol=min(len(handles), max_cols),
+        fontsize=fontsize,
+        frameon=False,
+    )
+
+    fig.canvas.draw()
+    legend_bbox = legend.get_window_extent(renderer=fig.canvas.get_renderer()).transformed(fig.transFigure.inverted())
+    axes_top = max(0.0, min(0.98, legend_bbox.y0 - top_padding))
+    fig.tight_layout(rect=[0, 0, 1, axes_top])
+    return legend
 
 
 def plot_por_hiperparametro_train_val(
@@ -81,6 +186,7 @@ def plot_por_hiperparametro_train_val(
     ncols=2,
     figsize_per_plot=(8, 4),
     sharey=False,
+    ylim=None,
 ):
     if runs_df.empty:
         raise ValueError("runs_df está vazio.")
@@ -90,21 +196,32 @@ def plot_por_hiperparametro_train_val(
         raise ValueError("runs_df precisa da coluna 'history'.")
 
     values = sorted(runs_df[param].dropna().unique())
+    if not values:
+        raise ValueError(f"Nenhum valor vÃ¡lido encontrado para '{param}'.")
+
     nplots = len(values)
     nrows = math.ceil(nplots / ncols)
+    legend_width_ratio = 0.45
 
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols,
-        figsize=(figsize_per_plot[0] * ncols, figsize_per_plot[1] * nrows),
-        sharey=sharey
+    fig, axes, legend_axes = _create_axes_with_right_legend_space(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=_figure_size_with_right_legend_space(
+            figsize_per_plot,
+            ncols,
+            nrows,
+            legend_width_ratio=legend_width_ratio,
+        ),
+        sharey=sharey,
+        legend_width_ratio=legend_width_ratio,
     )
-    axes = np.array(axes).reshape(-1)
 
     valid_group_cols = [c for c in group_cols if c in runs_df.columns]
     style_map = {"train": "--", "val": "-"}
 
     for i, pval in enumerate(values):
         ax = axes[i]
+        legend_ax = legend_axes[i]
         sub = runs_df[(runs_df[param] == pval) & runs_df["history"].notna()].copy()
 
         if sub.empty:
@@ -159,14 +276,16 @@ def plot_por_hiperparametro_train_val(
         ax.set_title(f"{param}={pval}")
         ax.set_xlabel("Epoch")
         ax.set_ylabel(metric_base)
+        _apply_ylim(ax, ylim)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8, loc="best")
+        _draw_legend_on_right_panel(ax, legend_ax, fontsize=8)
 
     for j in range(i + 1, len(axes)):
         fig.delaxes(axes[j])
+        fig.delaxes(legend_axes[j])
 
     fig.suptitle(f"{metric_base} por {param} (train/val)", y=1.02)
-    plt.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
     return fig, axes
 
 
@@ -512,10 +631,7 @@ def analisar_experimentos(
     for ax, metric in zip(axes, ["val_mse", "val_mae", "val_r2"]):
         _plot_metric(runs_df, metric=metric, ax=ax)
 
-    handles, labels = axes[-1].get_legend_handles_labels()
-    if handles:
-        fig.legend(handles, labels, loc="upper center", ncol=2, fontsize=8)
-    plt.tight_layout(rect=[0, 0, 1, 0.90])
+    _place_shared_legend_above_axes(fig, axes, fontsize=8, max_cols=3, top_padding=0.02)
 
     return runs_df, tabela_runs, tabela_exp, (fig, axes)
 
@@ -769,6 +885,7 @@ def plot_por_hiperparametro_train_val_lstm_glstm(
     ncols=2,
     figsize_per_plot=(20,10),
     sharey=False,
+    ylim=None,
 ):
     if runs_df.empty:
         raise ValueError("runs_df está vazio.")
@@ -778,21 +895,32 @@ def plot_por_hiperparametro_train_val_lstm_glstm(
         raise ValueError("runs_df precisa da coluna 'history'.")
 
     values = sorted(runs_df[param].dropna().unique())
+    if not values:
+        raise ValueError(f"Nenhum valor vÃ¡lido encontrado para '{param}'.")
+
     nplots = len(values)
     nrows = math.ceil(nplots / ncols)
+    legend_width_ratio = 0.45
 
-    fig, axes = plt.subplots(
-        nrows=nrows, ncols=ncols,
-        figsize=(figsize_per_plot[0] * ncols, figsize_per_plot[1] * nrows),
-        sharey=sharey
+    fig, axes, legend_axes = _create_axes_with_right_legend_space(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=_figure_size_with_right_legend_space(
+            figsize_per_plot,
+            ncols,
+            nrows,
+            legend_width_ratio=legend_width_ratio,
+        ),
+        sharey=sharey,
+        legend_width_ratio=legend_width_ratio,
     )
-    axes = np.array(axes).reshape(-1)
 
     valid_group_cols = [c for c in group_cols if c in runs_df.columns]
     style_map = {"train": "--", "val": "-"}
 
     for i, pval in enumerate(values):
         ax = axes[i]
+        legend_ax = legend_axes[i]
         sub = runs_df[(runs_df[param] == pval) & runs_df["history"].notna()].copy()
 
         if sub.empty:
@@ -847,16 +975,16 @@ def plot_por_hiperparametro_train_val_lstm_glstm(
         ax.set_title(f"{param}={pval}")
         ax.set_xlabel("Epoch")
         ax.set_ylabel(metric_base)
+        _apply_ylim(ax, ylim)
         ax.grid(True, alpha=0.3)
-        ax.legend(loc='center left',
-                  bbox_to_anchor=(1.02,0.5), frameon=False)
-        #ax.legend(fontsize=8, loc="upper center", ncol=3)
+        _draw_legend_on_right_panel(ax, legend_ax, fontsize=8)
 
     for j in range(i + 1, len(axes)):
         fig.delaxes(axes[j])
+        fig.delaxes(legend_axes[j])
 
     fig.suptitle(f"{metric_base} por {param} (train/val)", y=1.02)
-    plt.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
     return fig, axes
 
 

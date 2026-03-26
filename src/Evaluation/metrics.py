@@ -61,3 +61,56 @@ def weighted_mse_loss(
         loss = torch.mean(weights * (y_pred - y_true) ** 2)
 
     return loss
+
+
+
+def _init_r2_tracker(horizon):
+    return {
+        "global": {"ss_res": 0.0, "sum_y": 0.0, "sum_y2": 0.0, "count": 0},
+        "per_step": {
+            "ss_res": torch.zeros(horizon, dtype=torch.float64),
+            "sum_y": torch.zeros(horizon, dtype=torch.float64),
+            "sum_y2": torch.zeros(horizon, dtype=torch.float64),
+            "count": torch.zeros(horizon, dtype=torch.float64),
+        },
+    }
+
+
+def _update_r2_tracker(tracker, y_true, y_pred):
+    y_true_cpu = y_true.detach().to(torch.float64).cpu()
+    y_pred_cpu = y_pred.detach().to(torch.float64).cpu()
+
+    diff = y_true_cpu - y_pred_cpu
+    tracker["global"]["ss_res"] += diff.square().sum().item()
+    tracker["global"]["sum_y"] += y_true_cpu.sum().item()
+    tracker["global"]["sum_y2"] += y_true_cpu.square().sum().item()
+    tracker["global"]["count"] += y_true_cpu.numel()
+
+    y_true_step = y_true_cpu.reshape(y_true_cpu.shape[0], y_true_cpu.shape[1], -1)
+    y_pred_step = y_pred_cpu.reshape(y_pred_cpu.shape[0], y_pred_cpu.shape[1], -1)
+
+    tracker["per_step"]["ss_res"] += (y_true_step - y_pred_step).square().sum(dim=(0, 2))
+    tracker["per_step"]["sum_y"] += y_true_step.sum(dim=(0, 2))
+    tracker["per_step"]["sum_y2"] += y_true_step.square().sum(dim=(0, 2))
+    tracker["per_step"]["count"] += torch.full(
+        (y_true_step.shape[1],),
+        y_true_step.shape[0] * y_true_step.shape[2],
+        dtype=torch.float64,
+    )
+
+
+def _finalize_r2_tracker(tracker, eps=1e-8):
+    global_count = max(tracker["global"]["count"], 1)
+    global_mean = tracker["global"]["sum_y"] / global_count
+    global_ss_tot = tracker["global"]["sum_y2"] - global_count * (global_mean ** 2)
+    global_r2 = 1.0 - (tracker["global"]["ss_res"] / (global_ss_tot + eps))
+
+    step_count = tracker["per_step"]["count"].clamp_min(1.0)
+    step_mean = tracker["per_step"]["sum_y"] / step_count
+    step_ss_tot = tracker["per_step"]["sum_y2"] - step_count * step_mean.square()
+    step_r2 = 1.0 - (tracker["per_step"]["ss_res"] / (step_ss_tot + eps))
+
+    return {
+        "global": float(global_r2),
+        "per_step": [float(v) for v in step_r2.tolist()],
+    }
