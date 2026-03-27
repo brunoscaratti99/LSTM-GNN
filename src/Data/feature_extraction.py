@@ -23,7 +23,7 @@ def smart_load_dataset(path:str, variable:str):
             current_dir = os.getcwd()
             full_path = os.path.join(current_dir, path, file)
             # Load it and return it
-            return(xr.open_dataset(full_path))
+            return(xr.open_dataset(full_path, engine='netcdf4'))
         
     # If no files are found with this variable name, the user has made a value error
     raise(ValueError("".join(["A dataset of variable ", variable, " does not exist in path ", path])))
