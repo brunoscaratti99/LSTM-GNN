@@ -6,24 +6,54 @@ import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 import re
 import xarray as xr
 
+from Evaluation.plot_style import (
+    REFERENCE_COLOR,
+    apply_seaborn_theme,
+    prediction_palette,
+    save_figure,
+    style_axis,
+)
+
+
+apply_seaborn_theme()
+
 
 def scatter_true_pred(y_true, y_pred, T_max=1, title="scatter plot"):
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
     lims = [
         min(y_true.min(), y_pred.min()),
-        max(y_true.max(). y_pred.max())
+        max(y_true.max(), y_pred.max()),
     ]
-    
-    plt.plot(lims, lims, "k--", linewidth=1)
-    plt.xlim(lims)
-    plt.ylim(lims)
+    palette = prediction_palette()
+    fig, ax = plt.subplots(figsize=(7.2, 6.2))
+    ax.plot(lims, lims, color=REFERENCE_COLOR, linestyle="--", linewidth=1.2)
     for t in range(T_max):
-        plt.scatter(y_true[t].reshape(-1,1), y_pred[t].reshape(-1,1),)
+        sns.scatterplot(
+            x=y_true[t].reshape(-1),
+            y=y_pred[t].reshape(-1),
+            ax=ax,
+            color=palette["scatter"],
+            alpha=0.48,
+            s=24,
+            edgecolor="white",
+            linewidth=0.2,
+        )
+    ax.set_xlim(lims)
+    ax.set_ylim(lims)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("True")
+    ax.set_ylabel("Predicted")
+    ax.set_title(title)
+    style_axis(ax)
+    return fig, ax
 
-def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=None, figsize=(10,10)):
+def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=None, figsize=(10,10), savefig=None, close=True, show=None):
     """
     Plota mapa de calor de uma matriz NxN.
     Aceita numpy array, lista de listas ou tensor do PyTorch.
@@ -38,18 +68,32 @@ def plot_heatmap_nn(M, title="Mapa de calor", cmap="viridis", vmin=None, vmax=No
         raise ValueError(f"A matriz deve ser NxN. Recebido shape={M.shape}")
 
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(M, cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax)
-    cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("Valor")
+    sns.heatmap(
+        M,
+        ax=ax,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        square=False,
+        cbar_kws={"label": "Valor"},
+    )
 
     ax.set_title(title)
     ax.set_xlabel("Nó j")
     ax.set_ylabel("Nó i")
-    ax.set_xticks(range(M.shape[1]))
-    ax.set_yticks(range(M.shape[0]))
 
-    plt.tight_layout()
-    plt.show()
+    if savefig is not None:
+        save_figure(fig, savefig, dpi=190)
+    else:
+        fig.tight_layout()
+    if show is None:
+        show = not close
+    if show:
+        plt.show()
+
+    if close:
+        plt.close(fig)
+        plt.close('all')
     return fig, ax
 
 
@@ -637,28 +681,59 @@ def analisar_experimentos(
 
 
 
-def save_error_plots(path, train_mse, val_mse, train_mae, val_mae, train_r2, val_r2):
+def save_error_plots(
+    path,
+    train_mse,
+    val_mse,
+    train_mae,
+    val_mae,
+    train_r2,
+    val_r2,
+    metric_standard=None,
+    metric_threshold_mm=None,
+):
     metrics = [
         ("mse", train_mse, val_mse, "MSE"),
         ("mae", train_mae, val_mae, "MAE"),
         ("r2", train_r2, val_r2, "R2"),
     ]
+    palette = prediction_palette()
+    scope_suffix = (
+        f" (targets > {float(metric_threshold_mm):g} mm)"
+        if metric_standard == "modified" and metric_threshold_mm is not None
+        else ""
+    )
 
     for metric_name, train_values, val_values, y_label in metrics:
-        plt.figure(figsize=(12, 6))
+        fig, ax = plt.subplots(figsize=(12, 6))
         if len(train_values) > 0:
-            plt.plot(train_values, label="train", linewidth=2)
+            sns.lineplot(
+                x=np.arange(1, len(train_values) + 1),
+                y=np.asarray(train_values, dtype=float),
+                ax=ax,
+                label="train",
+                linewidth=2.3,
+                color=palette["train"],
+                estimator=None,
+            )
         if len(val_values) > 0:
-            plt.plot(val_values, label="val", linewidth=2)
+            sns.lineplot(
+                x=np.arange(1, len(val_values) + 1),
+                y=np.asarray(val_values, dtype=float),
+                ax=ax,
+                label="val",
+                linewidth=2.3,
+                color=palette["validation"],
+                estimator=None,
+            )
 
-        plt.xlabel("Epoch")
-        plt.ylabel(y_label)
-        plt.title(f"{y_label} by epoch")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(path, f"{metric_name}_curve.png"), dpi=150)
-        plt.close()
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(y_label)
+        ax.set_title(f"{y_label} by epoch{scope_suffix}")
+        style_axis(ax)
+        ax.legend()
+        save_figure(fig, os.path.join(path, f"{metric_name}_curve.png"), dpi=190)
+        plt.close(fig)
         
         
 def model_weights_hist(model):
@@ -691,15 +766,16 @@ def plot_estacao_unica(y_real, y_pred, station_idx, start_date_plot, station_nam
     y_pred_np = y_pred[:, station_idx].detach().cpu().numpy()
     datas = pd.date_range(start=start_date_plot, periods=len(y_real_np), freq="D")
 
-    plt.figure(figsize=(12, 4))
-    plt.plot(datas, y_real_np, label="ERA5 real", linewidth=2)
-    plt.plot(datas, y_pred_np, label="Rede estimado", linewidth=2)
-    plt.title(f"Real vs Previsto - nó {station_idx}" if station_name is None else f"Real vs Previsto - {station_name}")
-    plt.xlabel("Data")
-    plt.ylabel("Precipitação")
-    plt.grid(alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
+    palette = prediction_palette()
+    fig, ax = plt.subplots(figsize=(12, 4))
+    sns.lineplot(x=datas, y=y_real_np, ax=ax, label="ERA5 real", linewidth=2.2, color=palette["actual"], estimator=None)
+    sns.lineplot(x=datas, y=y_pred_np, ax=ax, label="Rede estimado", linewidth=2.2, color=palette["predicted"], estimator=None)
+    ax.set_title(f"Real vs Previsto - nó {station_idx}" if station_name is None else f"Real vs Previsto - {station_name}")
+    ax.set_xlabel("Data")
+    ax.set_ylabel("Precipitação")
+    style_axis(ax)
+    ax.legend()
+    fig.tight_layout()
     plt.show()
 
 
@@ -802,12 +878,13 @@ def plot_precip_pred_vs_true(
     else:
         fig = ax.figure
 
-    ax.plot(x, true_series, label="real", linewidth=2)
-    ax.plot(x, pred_series, label="predito", linewidth=2)
+    palette = prediction_palette()
+    sns.lineplot(x=x, y=true_series, ax=ax, label="real", linewidth=2.2, color=palette["actual"], estimator=None)
+    sns.lineplot(x=x, y=pred_series, ax=ax, label="predito", linewidth=2.2, color=palette["predicted"], estimator=None)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("Precipitacao")
     ax.set_title(title or f"Precipitacao real vs predita - {label}")
-    ax.grid(alpha=0.3)
+    style_axis(ax)
     ax.legend()
     fig.tight_layout()
 

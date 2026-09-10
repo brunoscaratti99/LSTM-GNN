@@ -1,0 +1,16 @@
+===========================================03/15==========================================================
+
+Use a low weight decay.
+
+Add ReduceLROnPlateau.
+
+Adjust gradient clipping.
+
+Check whether hidden_dim and learning rate are correctly configured.
+
+
+===========================================03/17==========================================================
+
+- Study the bias-variance trade-off and how to track it by comparing bias and variance across trained models.
+
+- Diagnose the network to find possible pipeline or training errors.

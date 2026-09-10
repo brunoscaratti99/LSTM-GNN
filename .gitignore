@@ -1,4 +1,10 @@
 __*
 *.nc
+*.zarr/
+Experiments/
+PLOTS/
+Comparison/
 __pycache__/
 *.pyc
+!Datasets/raw/.gitkeep
+!Datasets/processed/.gitkeep

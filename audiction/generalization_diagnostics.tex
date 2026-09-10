@@ -1,0 +1,863 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.15cm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{url}
+
+\definecolor{navy}{HTML}{17365D}
+\definecolor{bluebox}{HTML}{EAF2F8}
+\definecolor{redbox}{HTML}{FCE8E6}
+\definecolor{greenbox}{HTML}{EAF4EA}
+\definecolor{amberbox}{HTML}{FFF4D6}
+\definecolor{muted}{HTML}{5B6573}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=navy,
+  urlcolor=navy,
+  citecolor=navy,
+  pdftitle={Diagnóstico de generalização do pipeline GLSTM},
+  pdfauthor={Auditoria técnica do repositório LSTM-GNN}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{LSTM-GNN --- diagnóstico de generalização}
+\rhead{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\setlist[itemize]{leftmargin=1.45em,itemsep=0.35em,topsep=0.4em}
+\setlist[enumerate]{leftmargin=1.65em,itemsep=0.45em,topsep=0.4em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlength{\emergencystretch}{3em}
+\captionsetup{font=small,labelfont=bf}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{C}{>{\centering\arraybackslash}X}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\callout}[2][bluebox]{%
+  \par\medskip\noindent
+  \colorbox{#1}{\parbox{\dimexpr\linewidth-2\fboxsep\relax}{#2}}%
+  \par\medskip
+}
+\newcommand{\severity}[1]{\textbf{\textcolor{navy}{#1}}}
+
+\begin{document}
+\pagenumbering{roman}
+\hypersetup{pageanchor=false}
+
+\begin{titlepage}
+  \centering
+  \vspace*{1.7cm}
+  {\Huge\bfseries\color{navy} Diagnóstico de generalização do pipeline GLSTM\par}
+  \vspace{0.5cm}
+  {\Large Por que a previsão converge para a média --- ou para uma média ponderada\par}
+  \vspace{1.2cm}
+  \rule{0.84\textwidth}{0.8pt}
+  \vspace{0.8cm}
+
+  \begin{minipage}{0.87\textwidth}
+  \large
+  Auditoria do caminho realmente executado por \code{src/run_experiment.py}, incluindo dados,
+  cronologia, janelas, normalização, grafo, arquitetura GLSTM, função objetivo,
+  treinamento, checkpoint e inferência.
+
+  \vspace{0.7cm}
+  \normalsize
+  \textbf{Configuração de referência:}
+  \path{Experiments/run_experiment/glstm_sweep_20260715_120845}
+
+  \textbf{Data da auditoria:} 15 de julho de 2026
+
+  \textbf{Escopo:} diagnóstico e recomendações. Nenhuma alteração funcional foi aplicada ao
+  código de treinamento.
+  \end{minipage}
+
+  \vfill
+  {\large Repositório \code{LSTM-GNN}\par}
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\section{Conclusão executiva}
+
+\callout[redbox]{
+\textbf{Diagnóstico principal.} O comportamento observado não é, no estado atual, um caso
+clássico de rede que ajusta muito bem o treino e falha apenas em dados novos. O $R^2$ ordinário
+já é negativo no treino. A rede aprende modestamente a função objetivo configurada, mas essa
+função objetivo, combinada com pouco sinal preditivo para D+2--D+5, favorece justamente uma
+previsão quase constante. Com MSE comum, essa constante é a média. Com a
+\code{quantile_mse} atual, ela é uma \textbf{média ponderada alta}, aproximadamente
+$15{,}29$ mm.
+}
+
+Os dados e o alinhamento temporal foram verificados de ponta a ponta. Não foram encontrados
+NaNs, infinitos, datas faltantes, troca de eixos ou vazamento de alvos entre treino, validação e
+teste. O contrato efetivo é
+
+\[
+X\in\mathbb{R}^{B\times 35\times 62\times 25}
+\quad\longrightarrow\quad
+\widehat{y}\in\mathbb{R}^{B\times 5\times 62},
+\]
+
+compatível com $y\in\mathbb{R}^{B\times 5\times 62}$. Os scalers são ajustados somente no
+treino. Assim, o colapso não é explicado por um erro básico de shape ou cronologia.
+
+As causas mais importantes, em ordem, são:
+
+\begin{enumerate}
+  \item \severity{Crítica --- objetivo desalinhado.} A função chamada
+  \code{QuantileMSELoss} não é uma quantile loss do tipo pinball. Ela é uma MSE por faixas do
+  alvo. Com Q90 e pesos automáticos, cada observação extrema recebe aproximadamente nove vezes
+  o peso de uma observação comum. O ótimo sem sinal deixa de ser $4{,}58$ mm e passa a ser
+  $15{,}29$ mm.
+
+  \item \severity{Crítica --- densificação do grafo aprendível.} Com
+  \code{LOCK_TOPOLOGY=False}, todos os pares de estações tornam-se parametrizados. O mesmo
+  \code{weight_decay=0.005} é aplicado aos logits da adjacência; levar um logit negativo para
+  zero significa levar a probabilidade de uma não-aresta para $0{,}5$. O checkpoint terminou
+  com 69,0\% da massa normalizada em ligações que não existiam no KNN inicial.
+
+  \item \severity{Alta --- informação insuficiente para horizontes longos.} A entrada contém
+  somente agregados meteorológicos \emph{passados}. Não há NWP futuro alinhado a cada lead,
+  calendário, altitude ou embedding de estação; vento está desligado. D+1 ainda contém algum
+  sinal, mas a variabilidade prevista cai rapidamente até D+5.
+
+  \item \severity{Alta --- compressão e suavização.} O mesmo estado oculto final de dimensão
+  32 produz os cinco leads; a mistura espacial é aplicada dentro da recorrência a cada um dos
+  35 passos. Isso favorece \emph{oversmoothing} temporal e espacial.
+
+  \item \severity{Média --- avaliação incompleta.} Há somente um corte temporal, nenhuma
+  validação rolling-origin, nenhum holdout espacial e nenhum baseline climatológico integrado ao
+  runner. Além disso, alguns arquivos misturam métricas padronizadas e métricas em mm.
+\end{enumerate}
+
+No teste da configuração atual, a chuva real tem média $4{,}447$ mm e desvio-padrão
+$10{,}191$ mm. A previsão tem média $13{,}635$ mm e desvio-padrão $3{,}713$ mm. O resultado é
+viés de $+9{,}188$ mm, $R^2=-0{,}803$ e MSE físico de $187{,}24$ mm$^2$. Uma climatologia
+estação--mês ajustada apenas no treino obtém MSE de $103{,}29$ mm$^2$.
+
+\section{Escopo, evidência e definição de generalização}
+
+\subsection{Arquivos e artefatos examinados}
+
+O caminho de execução foi seguido a partir de \path{src/run_experiment.py:120}, sem inferir o
+comportamento a partir de notebooks antigos. Os principais pontos auditados foram:
+
+\begin{itemize}
+  \item configuração e orquestração: \path{src/run_experiment.py:46}--\path{src/run_experiment.py:311};
+  \item dataset datado: \path{src/Data/temporal_dataset.py:129}--\path{src/Data/temporal_dataset.py:567};
+  \item agregações ERA5: \path{src/Data/feature_extraction.py:173}--\path{src/Data/feature_extraction.py:257}
+  e \path{src/Data/feature_extraction.py:411}--\path{src/Data/feature_extraction.py:495};
+  \item topologia: \path{src/Graph/graph_related_utils.py:250}--\path{src/Graph/graph_related_utils.py:278};
+  \item GLSTM: \path{src/Models/model.py:129}--\path{src/Models/model.py:306};
+  \item loss e construção do modelo: \path{src/Training/experiment_runner.py:95}--\path{src/Training/experiment_runner.py:245};
+  \item treino, validação e checkpoint: \path{src/Training/Training_Routines.py:40}--\path{src/Training/Training_Routines.py:350};
+  \item inversão de escala e métricas físicas:
+  \path{src/Evaluation/experiment_outputs.py:118-177};
+  \item exportação das previsões:
+  \path{src/Evaluation/experiment_outputs.py:610-655}.
+\end{itemize}
+
+Foi usada como reprodução principal a execução
+\path{glstm_sweep_20260715_120845}, concluída com a configuração que está no topo do runner.
+Ela produziu 576.910 pares alvo--previsão no teste. Runs anteriores foram usados somente como
+ablação ou evidência histórica, e são identificados explicitamente quando aparecem.
+
+\subsection{O que ``dados novos'' significa neste runner}
+
+O runner mede apenas \textbf{generalização temporal para datas futuras nas mesmas 62
+estações}. A função \code{chronological_split} corta o eixo do tempo, mas preserva todos os nós
+nos três blocos. Portanto:
+
+\begin{itemize}
+  \item o teste é válido para novos dias nas posições já conhecidas;
+  \item não existe teste de estação, região ou célula ERA5 nunca vista;
+  \item o modelo possui uma adjacência $62\times 62$ e não aceita um novo nó sem reconstrução;
+  \item para alegar generalização espacial seria necessário um holdout por estação/região e uma
+  arquitetura indutiva para reconstruir as arestas.
+\end{itemize}
+
+Há ainda uma distinção de domínio importante: o catálogo INMET fornece nomes e coordenadas,
+mas as séries de entrada e o alvo são valores ERA5 amostrados no ponto de grade mais próximo.
+Em \path{src/Data/temporal_dataset.py:275}--\path{src/Data/temporal_dataset.py:294}, o próprio
+canal \code{tp} do ERA5 origina $y$. Observações pluviométricas dos CSVs INMET não entram no
+alvo. Assim, desempenho em uma estação real não é medido por este teste; seria uma transferência
+ERA5$\rightarrow$INMET adicional.
+
+\section{Rastreio do pipeline executado}
+
+\subsection{Fluxo efetivo}
+
+\begin{center}
+\begin{tabularx}{0.98\textwidth}{@{}p{0.07\textwidth}Y p{0.25\textwidth}@{}}
+\toprule
+\textbf{Etapa} & \textbf{Operação confirmada} & \textbf{Evidência principal} \\
+\midrule
+1 & Lê o catálogo, filtra RS e retém nomes, latitude e longitude. &
+\path{run_experiment.py:176-179}; \path{feature_extraction.py:454-467} \\
+2 & Abre caches diários ERA5 e amostra a grade na coordenada mais próxima de cada estação. &
+\path{temporal_dataset.py:180-192,248-376} \\
+3 & Concatena 25 features e usa \code{tp} como alvo diário. &
+$X=[9497,62,25]$, $y=[9497,62]$ \\
+4 & Faz split cronológico no eixo bruto antes das janelas. &
+\path{temporal_dataset.py:379-408} \\
+5 & Cria janelas separadamente: $[D-34,\ldots,D]\mapsto[D+1,\ldots,D+5]$. &
+\path{temporal_dataset.py:411-486} \\
+6 & Ajusta StandardScaler de features e alvo somente nas janelas de treino. &
+\path{temporal_dataset.py:508-555} \\
+7 & Converte para Torch e cria DataLoaders; somente treino é embaralhado. &
+\path{temporal_dataset.py:558-567}; \path{prepare_data.py:192-229} \\
+8 & Constrói KNN, GLSTM, loss, Adam, scheduler e early stopping. &
+\path{run_experiment.py:214-277} \\
+9 & Avalia o melhor checkpoint, coleta previsões e desfaz o scaler para os CSVs/gráficos. &
+\path{run_experiment.py:279-308} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Configuração atual}
+
+\begin{center}
+\begin{tabularx}{0.94\textwidth}{@{}p{0.28\textwidth}Y@{}}
+\toprule
+\textbf{Componente} & \textbf{Valor efetivo} \\
+\midrule
+Período & 01/01/2000 a 31/12/2025; 9.497 dias \\
+Nós e features & 62 nomes de estação; 25 canais ERA5 \\
+Janela e horizonte & 35 dias passados; saídas D+1 a D+5 \\
+Split & 60\% treino, 20\% validação, 20\% teste \\
+Escala & StandardScaler global por feature e StandardScaler global do alvo \\
+Grafo & KNN $k=2$; \code{LEARN_ADJ=True}; \code{LOCK_TOPOLOGY=False} \\
+GLSTM & hidden 32; 1 camada; dropout 0,3; saída linear direta de 5 leads \\
+Otimização & Adam; LR $10^{-3}$; weight decay $5\times10^{-3}$; clipping 1 \\
+Seleção & até 100 épocas; paciência 10; menor loss ponderada de validação \\
+Loss & \code{quantile_mse}; Q90; pesos inversos à frequência; máximo 20 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Integridade temporal e estatística dos dados}
+
+\subsection{Pontos que passaram na auditoria}
+
+\callout[greenbox]{
+\textbf{Não foi encontrado vazamento temporal ou desalinhamento do target.} Foram verificados
+9.497 timestamps diários consecutivos, sem duplicatas, e finitude de 14.720.350 valores de $X$
+e 588.814 valores de $y$. O canal histórico \code{tp} coincide com $y$ no mesmo dia, porém
+somente dias até $D$ entram no input; os alvos começam em $D+1$.
+}
+
+Os intervalos brutos e as primeiras datas-alvo após o warm-up são:
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Bloco} & \textbf{Intervalo bruto} & \textbf{Primeiro alvo} & \textbf{Janelas} \\
+\midrule
+Treino & 01/01/2000--07/08/2015 & 05/02/2000 & 5.659 \\
+Validação & 08/08/2015--18/10/2020 & 12/09/2015 & 1.860 \\
+Teste & 19/10/2020--31/12/2025 & 23/11/2020 & 1.861 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Os scalers e os limiares da loss são calculados somente com treino. A interseção de tempo e
+estações é feita antes do split, e a conversão a tensor ocorre depois da preservação das datas em
+xarray. Esses pontos são adequados.
+
+\subsection{Distribuição do alvo e drift}
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Estatística física} & \textbf{Treino} & \textbf{Teste} \\
+\midrule
+Média (mm) & 4,580 & 4,447 \\
+Mediana (mm) & 0,299 & 0,221 \\
+Desvio-padrão (mm) & 9,745 & 10,191 \\
+P90 (mm) & 15,202 & 14,474 \\
+P99 (mm) & 47,018 & 50,107 \\
+Máximo (mm) & 184,666 & 184,945 \\
+Fração $\leq0{,}1$ mm & 42,37\% & 44,41\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+O teste possui cauda levemente mais pesada, mas não há um drift grosseiro: média e escala são
+próximas e a maior mudança média entre features, medida na escala do treino, foi 0,077
+desvio-padrão. Além disso, o $R^2$ de treino já é negativo. Portanto, distribuição futura
+diferente não é a explicação principal.
+
+\subsection{Redundância das janelas}
+
+Janelas consecutivas compartilham 34 de 35 dias de input (97,1\%) e 4 de 5 dias de alvo
+(80\%). As 5.659 janelas de treino contêm 198.065 posições-dia de input, mas apenas 5.693 dias
+distintos nessas posições. Um mesmo alvo central aparece em até cinco amostras.
+
+Isso não cria leakage entre splits, porém cria pseudorreplicação, reduz o tamanho amostral
+efetivo e torna a incerteza dos resultados muito maior do que a contagem de janelas sugere. O
+scaler e os quantis também ponderam repetidamente os dias centrais. A avaliação deve usar blocos
+temporais e rolling-origin, não interpretar cada janela como observação independente.
+
+\section{Evidência quantitativa do colapso}
+
+\subsection{Resultado da configuração atual}
+
+Todas as métricas desta seção foram recalculadas no espaço físico a partir de
+\path{test_predictions_by_lead_day.csv}. O arquivo \code{test_metrics.json} contém MSE e MAE
+na escala padronizada quando \code{NORMALIZE_TARGET=True}; ele não deve ser comparado
+diretamente com valores em mm.
+
+\begin{center}
+\small
+\begin{tabular}{@{}crrrrrrr@{}}
+\toprule
+\textbf{Lead} & $\overline y$ & $\overline{\hat y}$ & $s_{\hat y}/s_y$ & \textbf{Corr.} & \textbf{Inclinação} & \textbf{Viés} & $R^2$ \\
+ & \multicolumn{2}{c}{\textbf{mm}} & & & & \textbf{mm} & \\
+\midrule
+D+1 & 4,436 & 11,525 & 0,614 & 0,363 & 0,223 & +7,089 & -0,416 \\
+D+2 & 4,445 & 13,898 & 0,328 & 0,180 & 0,059 & +9,453 & -0,850 \\
+D+3 & 4,452 & 14,186 & 0,239 & 0,131 & 0,031 & +9,734 & -0,906 \\
+D+4 & 4,454 & 14,135 & 0,199 & 0,118 & 0,024 & +9,681 & -0,894 \\
+D+5 & 4,448 & 14,432 & 0,166 & 0,120 & 0,020 & +9,985 & -0,947 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+O padrão é inequívoco: a média prevista sobe para a região 14--15 mm e o desvio-padrão
+desaparece conforme o lead aumenta. Em D+5, a inclinação da regressão
+$\widehat y=\alpha+\beta y$ é apenas $0{,}020$; isto é, elevar a chuva real em 50 mm altera a
+previsão em aproximadamente 1 mm.
+
+No agregado dos cinco leads:
+
+\begin{itemize}
+  \item média real 4,447 mm versus média prevista 13,635 mm;
+  \item desvio real 10,191 mm versus desvio previsto 3,713 mm;
+  \item correlação 0,196 e inclinação 0,071;
+  \item viés $+9{,}188$ mm, MAE 12,105 mm, MSE 187,241 mm$^2$ e $R^2=-0{,}803$;
+  \item 44,4\% dos alvos são $\leq0{,}1$ mm, mas apenas 0,022\% das previsões;
+  \item o modelo prevê mais de 10 mm em 88,5\% dos casos; a precisão desse evento é somente
+  15,2\%; nenhuma previsão supera 50 mm.
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{../Experiments/run_experiment/glstm_sweep_20260715_120845/prediction_overview/02_predictions_vs_actual.png}
+  \caption{Run atual. Em D+5, a série prevista permanece próxima de 14 mm enquanto a chuva
+  real alterna entre dias secos e picos. O scatter mostra forte compressão vertical.}
+  \label{fig:current-collapse}
+\end{figure}
+
+\subsection{Baselines ajustados somente no treino}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Preditor no teste} & \textbf{MSE} & \textbf{RMSE} & \textbf{MAE} & $R^2$ & \textbf{Viés} \\
+ & \textbf{mm$^2$} & \textbf{mm} & \textbf{mm} & & \textbf{mm} \\
+\midrule
+GLSTM atual & 187,241 & 13,684 & 12,105 & -0,803 & +9,188 \\
+Média global de treino & 103,884 & 10,192 & 6,139 & -0,000 & +0,135 \\
+Média por estação & 103,470 & 10,172 & 6,106 & 0,004 & +0,135 \\
+Climatologia estação--mês & \textbf{103,286} & \textbf{10,163} & \textbf{6,094} & \textbf{0,006} & +0,146 \\
+Zero & 123,640 & 11,119 & \textbf{4,447} & -0,190 & -4,447 \\
+Persistência no fim da janela & 192,750 & 13,883 & 6,910 & -0,856 & -0,019 \\
+Média ponderada Q90 de treino & 221,316 & 14,877 & 13,697 & -1,131 & +10,837 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A GLSTM atual tem MSE 81,3\% maior que a climatologia estação--mês. A persistência tem MSE
+alto para chuva diária, mas ainda obtém MAE muito menor que a GLSTM. O baseline zero obtém MAE
+de 4,447 mm porque há muitos dias secos; isso mostra por que uma única métrica não é suficiente,
+mas também torna injustificável um modelo com viés positivo de quase 10 mm.
+
+\subsection{A regressão à média sob MSE comum}
+
+Um run histórico com MSE comum,
+\path{glstm_sweep_20260713_160748}, usa outra configuração e, portanto, não é uma ablação
+perfeitamente controlada. Ele serve para mostrar o mecanismo clássico: quando a perda volta a
+ser MSE e o sinal desaparece, a constante deixa de ser 15 mm e volta à média de aproximadamente
+4--5 mm.
+
+\begin{center}
+\small
+\begin{tabular}{@{}crrrrr@{}}
+\toprule
+\textbf{Lead} & $\overline y$ & $\overline{\hat y}$ & $s_{\hat y}/s_y$ & \textbf{Corr.} & $R^2$ \\
+\midrule
+D+1 & 4,806 & 4,321 & 0,394 & 0,429 & 0,181 \\
+D+2 & 4,817 & 4,053 & 0,151 & 0,177 & 0,026 \\
+D+3 & 4,824 & 4,027 & 0,102 & 0,112 & 0,007 \\
+D+4 & 4,828 & 4,108 & 0,076 & 0,092 & 0,004 \\
+D+5 & 4,831 & 4,154 & 0,065 & 0,094 & 0,004 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{../Experiments/run_experiment/glstm_sweep_20260713_160748/prediction_overview/02_predictions_vs_actual.png}
+  \caption{Run histórico com MSE. Em D+5, a saída laranja converge para a média comum e quase
+  não varia. A loss atual muda a altura da linha, mas não resolve a falta de dispersão.}
+  \label{fig:mse-collapse}
+\end{figure}
+
+\section{Por que a loss produz uma média ponderada}
+
+\subsection{Derivação}
+
+Para uma constante $c$ e MSE ponderada,
+
+\[
+L(c)=\frac{\sum_i w_i(c-y_i)^2}{\sum_i w_i},
+\qquad
+\frac{\partial L}{\partial c}=0
+\quad\Longrightarrow\quad
+c^*=\frac{\sum_i w_i y_i}{\sum_i w_i}.
+\]
+
+Na forma condicional, o regressor ótimo é
+
+\[
+f^*(x)=\frac{\mathbb{E}[w(Y)Y\mid X=x]}{\mathbb{E}[w(Y)\mid X=x]}.
+\]
+
+Se $X$ informa pouco sobre o futuro, $f^*(x)$ varia pouco e se aproxima do centroide global.
+Em MSE comum, $w=1$ e esse centroide é a média. Na loss atual, os pesos são construídos em
+\path{src/Training/experiment_runner.py:169}--\path{src/Training/experiment_runner.py:235}:
+
+\begin{itemize}
+  \item 90\% inferiores: peso $0{,}199995$, média $1{,}902$ mm;
+  \item 10\% superiores ao Q90: peso $1{,}800005$, média $28{,}681$ mm.
+\end{itemize}
+
+Cada extremo recebe cerca de nove vezes o peso de um caso comum. Como há nove vezes mais casos
+comuns, os dois grupos recebem aproximadamente a mesma massa total. O ótimo constante torna-se
+
+\[
+c^*\approx\frac{1{,}902+28{,}681}{2}=15{,}291\ \text{mm}.
+\]
+
+É exatamente a região para a qual D+2--D+5 convergem. O nome
+\code{quantile_mse} pode induzir a interpretação errada: ele \textbf{não} estima o quantil 0,9.
+Para isso seria necessária pinball loss. Ele estima uma média condicional reponderada.
+
+\subsection{A seleção do checkpoint reforça o desalinhamento}
+
+O early stopping e o scheduler usam a mesma loss ponderada. No run atual:
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Estado} & \textbf{Época} & \textbf{Val loss} & \textbf{Val MSE pad.} & \textbf{Val $R^2$} \\
+\midrule
+Primeira época & 1 & 2,7769 & 1,9263 & -0,898 \\
+Melhor MSE/$R^2$ ordinário & 6 & 2,7365 & \textbf{1,7674} & \textbf{-0,739} \\
+Checkpoint pela loss configurada & 13 & \textbf{2,7121} & 1,9842 & -0,952 \\
+Última época registrada & 24 & 2,7204 & 1,9869 & -0,954 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A loss ponderada melhora, enquanto o $R^2$ físico piora. O otimizador está fazendo o que foi
+pedido. O problema é que o critério de seleção não corresponde ao comportamento que se deseja
+avaliar.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{../Experiments/run_experiment/glstm_sweep_20260715_120845/r2_curve.png}
+  \caption{$R^2$ ordinário negativo em treino e validação no run atual. Não há o padrão
+  principal de overfit clássico; o objetivo monitorado é outro.}
+\end{figure}
+
+\section{O grafo aprendível está promovendo oversmoothing}
+
+\subsection{Mecanismo no código}
+
+Em \path{src/Models/model.py:139}--\path{src/Models/model.py:187}, uma não-aresta é
+representada por probabilidade $10^{-4}$, isto é, logit aproximadamente $-9{,}21$. Com
+\code{LOCK_TOPOLOGY=False}, todas as 3.624 não-arestas entram no vetor de parâmetros.
+
+O treino separa \code{a_logits} apenas para permitir outro learning rate, mas cria o Adam com o
+mesmo \code{weight_decay} para todos os grupos
+(\path{src/Training/Training_Routines.py:126}--\path{src/Training/Training_Routines.py:145}).
+L2 leva logits para zero. Para uma aresta probabilística, isso não é esparsidade:
+
+\[
+a_{ij}\rightarrow 0
+\quad\Longrightarrow\quad
+\sigma(a_{ij})\rightarrow 0{,}5.
+\]
+
+Depois de cada passo, os logits também são truncados em $[-6,6]$
+(\path{src/Training/Training_Routines.py:226}--\path{src/Training/Training_Routines.py:229}).
+O primeiro clamp sozinho eleva uma não-aresta de $10^{-4}$ para
+$\sigma(-6)=0{,}00247$, cerca de 25 vezes.
+
+\subsection{Evidência no checkpoint}
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Componente da adjacência} & \textbf{Inicial} & \textbf{Checkpoint} \\
+\midrule
+Probabilidade média nas 158 arestas dirigidas KNN & 0,9500 & 0,5433 \\
+Probabilidade média nas 3.624 não-arestas & 0,0001 & 0,09049 \\
+Massa normalizada em self-loops & --- & 13,05\% \\
+Massa normalizada nas arestas KNN & --- & 17,87\% \\
+Massa normalizada nas não-arestas & --- & \textbf{69,04\%} \\
+Segundo autovalor em módulo $|\lambda_2|$ & --- & 0,2823 \\
+Proxy $|\lambda_2|^{35}$ & --- & $\approx6\times10^{-20}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+O proxy espectral não é uma igualdade para a GLSTM, porque gates e transformações não lineares
+intervêm. Ele mostra, contudo, quão rapidamente a propagação espacial pura apagaria componentes
+não constantes. Isso é relevante porque \code{H_prev @ A} e \code{C_prev @ A} são aplicados em
+cada passo da célula (\path{src/Models/model.py:197}--\path{src/Models/model.py:215}) e o loop
+tem 35 passos (\path{src/Models/model.py:277}--\path{src/Models/model.py:280}).
+
+A dispersão espacial média no alvo é 4,13 mm; ela cai para 1,25 mm no modelo com grafo
+aprendível e 1,56 mm no par com grafo fixo. Em uma comparação quase controlada,
+\path{glstm_sweep_20260715_103451} (grafo fixo) obteve $R^2=-0{,}747$, enquanto o run atual
+aprendível obteve $-0{,}803$. Logo, o grafo não é a causa única, mas piora a homogeneização.
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{../Experiments/run_experiment/glstm_sweep_20260715_120845/initial_topology.png}
+    \caption*{Inicial: KNN forte e não-arestas próximas de zero.}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{../Experiments/run_experiment/glstm_sweep_20260715_120845/topology.png}
+    \caption*{Final: arestas originais enfraquecidas e fundo denso de baixa intensidade.}
+  \end{minipage}
+  \caption{Adjacência não normalizada antes e depois do treinamento. A escala visual escura
+  torna os pesos 0,09 discretos, mas a quantidade de não-arestas faz sua massa dominar.}
+\end{figure}
+
+\section{Limitação informacional e arquitetural}
+
+\subsection{O input não é uma previsão meteorológica de D+1--D+5}
+
+As 25 features são agregados diários históricos de precipitação, temperatura/ponto de orvalho,
+umidade específica e velocidade vertical. \code{INCLUDE_WIND=False}. Não há:
+
+\begin{itemize}
+  \item campos NWP previstos para cada lead;
+  \item seno/cosseno de dia do ano ou mês;
+  \item latitude, longitude, altitude ou embedding persistente da estação;
+  \item índices de circulação, pressão à superfície, CAPE ou umidade integrada configurados no
+  run atual;
+  \item direção espacial da advecção; o grafo é estático e simétrico.
+\end{itemize}
+
+O catálogo contém altitudes de 0 a 1.228,59 m, porém
+\path{src/Data/feature_extraction.py:454}--\path{src/Data/feature_extraction.py:467} retém somente
+latitude e longitude, e estas nem sequer entram como feature do modelo. O tempo permanece em
+xarray como coordenada, mas é descartado na fronteira Torch. Assim, a rede precisa inferir
+sazonalidade e orografia apenas pelas séries passadas.
+
+Uma verificação univariada confirma o rápido desaparecimento do sinal: a persistência da última
+chuva observada tem correlação 0,220 com D+1 e 0,042 com D+5. A maior correlação absoluta entre
+qualquer feature no fim da janela e o alvo foi 0,288 em D+1 e 0,049 em D+5. Relações não
+lineares podem existir, mas esses valores explicam por que um regressor determinístico se apoia
+no centroide para leads longos.
+
+\subsection{Head direto e gargalo comum}
+
+Em \path{src/Models/model.py:253}--\path{src/Models/model.py:281}, o último estado oculto de
+cada nó passa por um MLP que produz os cinco leads de uma vez. Não há decoder temporal,
+embedding de lead, mecanismo autoregressivo ou covariável futura. A mesma representação deve
+servir simultaneamente D+1 e D+5.
+
+Isso produz a sequência observada: correlação 0,363 e razão de desvios 0,614 em D+1, mas
+correlação 0,120 e razão 0,166 em D+5. Mesmo sob MSE simples, D+5 conserva somente 6,5\% do
+desvio real. Aumentar hidden de 32 para 256, mantendo uma configuração próxima, não resolveu
+($R^2$ passou de $-0{,}747$ para $-0{,}776$). Capacidade bruta não substitui informação e um
+objetivo adequado.
+
+\subsection{A natureza de uma previsão pontual}
+
+Mesmo um regressor MSE correto estima $\mathbb{E}[Y\mid X]$, não uma realização aleatória de
+$Y$. Portanto, sua série deve ser mais suave que a observada. O problema aqui não é a mera
+existência de suavização; é sua magnitude e sua falta de skill: inclinações próximas de zero,
+$R^2$ negativo e desempenho inferior a climatologias de treino.
+
+Para precipitação zero-inflada e de cauda longa, uma previsão distribucional ou em duas partes
+é mais informativa que forçar um único valor a representar simultaneamente ocorrência, volume e
+extremos.
+
+\section{Problemas secundários e observabilidade}
+
+\begin{longtable}{@{}p{0.27\textwidth}p{0.67\textwidth}@{}}
+\toprule
+\textbf{Achado} & \textbf{Impacto} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Achado} & \textbf{Impacto} \\
+\midrule
+\endhead
+KNN em graus & \path{graph_related_utils.py:250-278} usa distância euclidiana em
+[longitude, latitude], sem Haversine nem peso por distância. Com $k=2$, 7 de 62 nós mudam de
+vizinho em relação ao KNN geodésico; as arestas chegam a 150,9 km. \\
+\addlinespace
+Nós duplicados & As 62 coordenadas de estação mapeiam para apenas 60 células ERA5 de 0,25 grau.
+BAGE/BAGE--CENTRO e CHARQUEADAS/PARQUE ELDORADO têm séries idênticas, embora sejam nós
+separados. \\
+\addlinespace
+Scaler global do alvo & \path{temporal_dataset.py:529-550} usa \code{reshape(-1,1)} para todas
+as estações e leads. Se o sinal se perde, zero padronizado volta diretamente à média global, não
+a uma climatologia específica do nó/estação. \\
+\addlinespace
+Unidades stale & A precipitação é multiplicada por 1.000 em
+\path{feature_extraction.py:438-443}, mas o Zarr diário ainda declara unidade ``m''; temperatura
+é convertida a graus Celsius, enquanto o cache ainda pode declarar ``K''. Os valores usados no
+run são coerentes com mm/°C, mas o metadado cria risco de dupla conversão futura. \\
+\addlinespace
+Métricas em escalas diferentes & \code{test_metrics.json} mede loss/MSE/MAE no alvo
+padronizado; os CSVs posteriores são inversamente transformados para mm. O nome das métricas
+não carrega a unidade. \\
+\addlinespace
+MAPE sem interpretação & Com muitos zeros, MAPE físico já é instável. No treino atual ele é
+calculado sobre o alvo padronizado; zero significa ``igual à média do treino'', não ``sem chuva''.
+O valor 476,97\% não deve orientar seleção. \\
+\addlinespace
+Média por batch & Loss, MSE e MAE são promediadas por número de batches, não pelo número de
+elementos. O último batch menor recebe peso excessivo. O $R^2$ global usa acumuladores corretos. \\
+\addlinespace
+Resumo versus checkpoint & \code{run_summary.json} guarda várias métricas da última época,
+mas \code{model_state_dict.pt} guarda o melhor checkpoint pela loss. As duas linhas não
+descrevem necessariamente o mesmo modelo. \\
+\addlinespace
+Datas nulas no resumo & Os DataLoaders usam \code{TensorDataset}; por isso
+\code{train_start_date}, \code{train_end_date} e equivalentes saem nulos, embora as datas ainda
+existam em \code{dataset_contract.json}. \\
+\addlinespace
+Sem diagnóstico de clipping & O retorno de \code{clip_grad_norm_} é descartado. Não se sabe em
+quantos batches o limite 1 está efetivamente reduzindo o gradiente. \\
+\bottomrule
+\end{longtable}
+
+\section{Hipóteses descartadas ou rebaixadas}
+
+\begin{itemize}
+  \item \textbf{Leakage/target deslocado:} não confirmado; as datas e shapes estão corretos e os
+  alvos de cada split são disjuntos.
+  \item \textbf{NaN/Inf:} não confirmado nos dados atuais.
+  \item \textbf{Drift como causa dominante:} rebaixado; treino e teste têm estatísticas
+  próximas, e o treino também apresenta $R^2$ negativo.
+  \item \textbf{Overfit clássico do default:} rebaixado; loss de treino e validação são próximas.
+  Há runs históricos maiores com gap treino--validação, mas esse não é o padrão principal do run
+  atual.
+  \item \textbf{Normalização do target como causa isolada:} rebaixada; ablações com e sem
+  normalização permanecem ruins. O problema é o objetivo, o sinal e a arquitetura espacial.
+  \item \textbf{Poucos parâmetros apenas:} rebaixado; hidden 256 não trouxe ganho. Um modelo
+  maior pode memorizar treino sem resolver a transferência temporal.
+\end{itemize}
+
+\section{Plano recomendado}
+
+\subsection{Prioridade P0 --- tornar a conclusão mensurável}
+
+Antes de nova arquitetura, o runner deve produzir em todo run:
+
+\begin{enumerate}
+  \item baselines ajustados somente no treino: zero, média global, média por estação,
+  climatologia estação--mês e persistência no fim da janela;
+  \item métricas físicas por lead, estação, estação do ano e regime de chuva: MSE, RMSE, MAE,
+  $R^2$, viés, correlação, inclinação e $s_{\hat y}/s_y$;
+  \item classificação para limiares como 0,1, 1, 10 mm, Q90 e Q95: precisão, recall, FAR, CSI e
+  Brier score quando houver probabilidade;
+  \item datas exatas dos splits, scaler completo, unidade de cada artefato, melhor época em cada
+  métrica e norma pré-clipping;
+  \item gráficos da massa em arestas/não-arestas, grau efetivo, $|\lambda_2|$ e variância espacial
+  por época.
+\end{enumerate}
+
+\subsection{Prioridade P1 --- separar objetivo, horizonte e grafo}
+
+Executar uma matriz controlada, mesma seed, mesmo split e mesmos dados:
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}p{0.09\textwidth}p{0.19\textwidth}p{0.17\textwidth}Y@{}}
+\toprule
+\textbf{Teste} & \textbf{Horizonte} & \textbf{Grafo} & \textbf{Objetivo} \\
+\midrule
+A0 & --- & --- & Climatologia estação--mês \\
+A1 & D+1 & Sem grafo & MSE comum \\
+A2 & D+1 & KNN Haversine fixo & MSE comum \\
+A3 & D+1 & Topologia KNN travada & MSE, adjacência aprendível sem decay nos logits \\
+A4 & D+1--D+5 & Melhor opção A1--A3 & Um modelo separado por lead ou decoder com embedding de lead \\
+A5 & D+1--D+5 & Melhor grafo & Pinball verdadeira para quantis explícitos \\
+A6 & D+1--D+5 & Melhor grafo & Ocorrência + quantidade positiva/distribuição \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Não avançar para D+5 antes de obter skill reprodutível em D+1. Um teste adicional deve fazer a
+rede memorizar deliberadamente 16--32 janelas, sem dropout, weight decay, AMP ou grafo
+aprendível. Se ela não levar a loss quase a zero, existe um problema de capacidade/gradiente
+separado da generalização.
+
+\subsection{Prioridade P1 --- corrigir o grafo aprendível}
+
+\begin{itemize}
+  \item usar \code{LEARN_ADJ=False} como baseline obrigatório;
+  \item quando aprender pesos, começar com \code{LOCK_TOPOLOGY=True};
+  \item definir \code{weight_decay=0} especificamente para \code{a_logits};
+  \item substituir L2 nos logits por penalidade de esparsidade sobre probabilidades off-diagonal,
+  top-$k$ ou orçamento de massa explícito;
+  \item não usar clamp incompatível com a probabilidade inicial $10^{-4}$; ou inicializar de modo
+  coerente com o intervalo permitido;
+  \item comparar KNN Haversine ponderado por distância e grafo dirigido/dinâmico informado por
+  vento;
+  \item testar mistura espacial residual uma vez por bloco, em vez de difusão total do estado de
+  célula em todos os passos.
+\end{itemize}
+
+Um teste unitário conceitual deve executar um passo sem gradiente informativo e confirmar que
+uma não-aresta não cresce apenas por weight decay/clamp. O comportamento atual falha nesse
+critério.
+
+\subsection{Prioridade P2 --- fornecer informação realmente preditiva}
+
+\begin{itemize}
+  \item incluir seno/cosseno de dia do ano e, se apropriado, hora/estação;
+  \item incluir latitude, longitude, altitude e/ou embedding de nó;
+  \item habilitar e validar vento, preferencialmente de modo direcional;
+  \item para previsão D+1--D+5, fornecer covariáveis NWP válidas em cada lead, não somente
+  observações históricas;
+  \item considerar previsão residual sobre climatologia ou NWP, preservando um caminho de skip;
+  \item se o alvo final for estação INMET, treinar e avaliar contra observação INMET, com ERA5
+  como covariável, não como substituto silencioso do alvo.
+\end{itemize}
+
+\subsection{Prioridade P2 --- objetivo adequado à precipitação}
+
+Há três perguntas distintas e elas não devem ser misturadas em uma única MSE ponderada:
+
+\begin{enumerate}
+  \item \textbf{Vai chover?} Classificação/probabilidade de ocorrência.
+  \item \textbf{Quanto, dado que chove?} Distribuição positiva, por exemplo Gamma/lognormal, ou
+  uma família como Tweedie quando apropriada.
+  \item \textbf{Qual o risco de extremo?} Quantis com pinball loss ou probabilidade de exceder
+  limiares, avaliada com métricas probabilísticas.
+\end{enumerate}
+
+\code{Softplus} não deve ser aplicado diretamente a um alvo padronizado que possui valores
+negativos. A transformação e a distribuição precisam ser definidas de forma consistente. Uma
+saída determinística pode permanecer como baseline, mas deve ser comparada à climatologia e não
+ser tratada como amostra realista da chuva.
+
+\subsection{Critérios de aceitação}
+
+Uma modificação só deve ser considerada melhoria se:
+
+\begin{itemize}
+  \item superar climatologia estação--mês no mesmo bloco temporal, por lead;
+  \item manter viés e razão de desvios reportados, evitando ganho aparente por previsão constante;
+  \item repetir o ganho em múltiplas seeds e janelas rolling-origin;
+  \item para a GNN, superar o mesmo modelo sem grafo sob idênticas condições;
+  \item se a alegação incluir novas estações, superar um holdout espacial explícito;
+  \item preservar esparsidade/massa do grafo dentro de limites definidos antes do treino;
+  \item reportar separadamente skill em seco, chuva moderada e extremos.
+\end{itemize}
+
+\section{Resposta direta}
+
+O modelo converge para a média porque uma previsão pontual por erro quadrático escolhe o
+centro condicional quando não consegue distinguir os futuros possíveis. No GLSTM atual, essa
+tendência é amplificada por quatro fatos concretos:
+
+\begin{enumerate}
+  \item o histórico contém pouco sinal para chuva exata em D+2--D+5 e não há preditores futuros;
+  \item os cinco leads saem do mesmo estado oculto final, cuja variabilidade diminui com o lead;
+  \item o grafo aprendível torna-se quase global e mistura os nós repetidamente;
+  \item a loss atual troca a média comum de 4,58 mm por uma média ponderada de 15,29 mm.
+\end{enumerate}
+
+Por isso, com MSE comum vê-se uma linha próxima de 4--5 mm; com
+\code{quantile_mse}, vê-se uma linha próxima de 14--15 mm. O fenômeno é o mesmo: pouca
+dependência de $X$ e grande dependência do centroide imposto pela função objetivo.
+
+\callout[amberbox]{
+\textbf{Síntese final.} O primeiro passo não é aumentar a rede. É alinhar objetivo e métrica,
+desativar a adjacência livre, provar skill em D+1 contra climatologia e adicionar informação
+futura/estática. Só depois faz sentido reintroduzir um grafo aprendível e o horizonte completo.
+}
+
+\appendix
+\section{Trilha de evidências reproduzíveis}
+
+\begin{longtable}{@{}p{0.33\textwidth}p{0.61\textwidth}@{}}
+\toprule
+\textbf{Artefato} & \textbf{Uso nesta auditoria} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Artefato} & \textbf{Uso nesta auditoria} \\
+\midrule
+\endhead
+\path{.../120845/config.json} & Configuração efetiva do run atual. \\
+\path{.../120845/dataset_contract.json} & Shapes, features, estações e cobertura temporal. \\
+\path{.../120845/run_summary.json} & Pesos/limiar da loss, épocas, loss e $R^2$ registrados. \\
+\path{.../120845/hist.pt} & Localização das melhores épocas por loss e por MSE/$R^2$. \\
+\path{.../120845/model_state_dict.pt} & Probabilidades e espectro da adjacência do checkpoint. \\
+\path{.../120845/test_predictions_by_lead_day.csv} & Distribuições, correlação, inclinação, viés e métricas físicas. \\
+\path{.../120845/forecast_horizon_diagnostics/test_prediction_metrics_by_lead_day.csv} & Conferência das métricas físicas por lead. \\
+\path{.../160748/test_predictions_by_lead_day.csv} & Evidência histórica do colapso à média sob MSE comum. \\
+\path{Datasets/processed/daily/precipitation_daily.zarr} & Reconstrução de distribuição de treino e baselines sem usar o teste para ajuste. \\
+\bottomrule
+\end{longtable}
+
+\section{Limitações da auditoria}
+
+\begin{itemize}
+  \item As comparações identificadas como históricas usam hiperparâmetros diferentes e não são
+  apresentadas como efeito causal isolado.
+  \item Correlações univariadas não excluem relações não lineares; elas medem a dificuldade e a
+  perda progressiva de sinal, não uma impossibilidade matemática.
+  \item Os totais diários ERA5 não foram confrontados com uma fonte meteorológica independente
+  nem com pluviômetros INMET nesta auditoria.
+  \item Não foi implementada uma correção funcional. O documento registra o diagnóstico e uma
+  sequência de experimentos capaz de separar as causas.
+\end{itemize}
+
+\vfill
+\begin{center}
+\color{muted}\small
+Documento gerado a partir do código e dos artefatos locais do repositório em 15/07/2026.
+\end{center}
+
+\end{document}

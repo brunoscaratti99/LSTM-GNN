@@ -4,29 +4,20 @@ import torch
 import numpy as np
 import time
 from math import radians, cos, sin, asin, sqrt
-import os
+from Data.dataset_paths import open_meteorological_dataset
 
-def smart_load_dataset(path:str, variable:str):
+def smart_load_dataset(path: str, variable: str, prefer_processed=True):
     """
     Made to load a era5 dataset independently of the specific date range at the end of the name.
     Instead this function loads it based on variable name.
     """
-
-    # List all files in dir
-    dir_files = os.listdir(path)
-
-    # Loop through them
-    for file in dir_files:
-        # If the varible string is in the name of one of the files
-        if variable in file:
-            # Get the full path to it
-            current_dir = os.getcwd()
-            full_path = os.path.join(current_dir, path, file)
-            # Load it and return it
-            return(xr.open_dataset(full_path, engine='netcdf4'))
-        
-    # If no files are found with this variable name, the user has made a value error
-    raise(ValueError("".join(["A dataset of variable ", variable, " does not exist in path ", path])))
+    return open_meteorological_dataset(
+        variable,
+        raw_dir=path,
+        prefer_processed=prefer_processed,
+        include_legacy=True,
+        engine="netcdf4",
+    )
 
 
 
@@ -125,7 +116,7 @@ def era5_uv_to_tensor(
     stations: dict {name: (lat, lon)} ou DataFrame com colunas ['name','lat','lon']
     retorna: torch.Tensor [days, n_estacoes, 2] (direção, velocidade)
     """
-    ds = xr.open_dataset(nc_path)
+    ds = open_meteorological_dataset(nc_path)
 
     # resolve estações
     if isinstance(stations, dict):
@@ -327,7 +318,7 @@ def era5_specific_humidity_tensor(nc_path, stations, start=None, end=None, var_n
     Lê ERA5 de specific humidity horário e retorna tensor diário [T, N, 3]
     com canais [max, mean, min].
     """
-    ds = xr.open_dataset(nc_path)
+    ds = open_meteorological_dataset(nc_path)
     if start is not None or end is not None:
         ds = ds.sel(time=slice(start, end))
 

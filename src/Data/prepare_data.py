@@ -189,35 +189,43 @@ def train_split(Xs, ys, train_ratio=0.7, val_ratio=0.2, window_size=None, horizo
 
 
     
-def create_batchs(X_train, X_val, X_test, y_train, y_val, y_test, batch_size, device, num_workers=0):
+def create_batchs(
+    X_train,
+    X_val,
+    X_test,
+    y_train,
+    y_val,
+    y_test,
+    batch_size,
+    device,
+    num_workers=0,
+    persistent_workers=None,
+    prefetch_factor=None,
+    shuffle_train=True,
+):
     pin_memory = (device=='cuda')
     train_ds = TensorDataset(X_train,y_train)
     val_ds   = TensorDataset(X_val, y_val)
     test_ds  = TensorDataset(X_test, y_test)
+
+    if persistent_workers is None:
+        persistent_workers = num_workers > 0
+
+    loader_kwargs = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+    }
+    if num_workers > 0:
+        loader_kwargs["persistent_workers"] = persistent_workers
+        if prefetch_factor is not None:
+            loader_kwargs["prefetch_factor"] = prefetch_factor
     
-    train_loader = DataLoader(
-        train_ds, 
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory
-    )
+    train_loader = DataLoader(train_ds, shuffle=shuffle_train, **loader_kwargs)
     
-    val_loader = DataLoader(
-        val_ds, 
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory
-    )
+    val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
      
-    test_loader = DataLoader(
-        test_ds, 
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory
-    )
+    test_loader = DataLoader(test_ds, shuffle=False, **loader_kwargs)
     return train_loader, val_loader, test_loader
 
 def slice_intervalos_anuais(dataset: xr.Dataset, 

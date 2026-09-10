@@ -1,207 +1,288 @@
-# Previsão de Precipitação com GNN + LSTM
+# LSTM-GNN Precipitation Forecasting
 
-Este repositório apresenta uma implementação de um modelo **Graph Neural Network (GNN) combinado com Long Short-Term Memory (LSTM)** para **previsão de precipitação utilizando dados de estações meteorológicas**.
+This repository implements graph-temporal precipitation forecasting over meteorological station networks. It combines LSTM/GLSTM models, graph topology utilities, and an experimental graph-temporal Transformer with a date-aware ERA5/INMET data pipeline.
 
-O modelo explora:
+The current branch focuses on a reproducible source-level workflow:
 
-- **dependências espaciais entre estações meteorológicas** através de grafos
-- **dependências temporais das variáveis meteorológicas** através de redes recorrentes
+- meteorological datasets are kept as dated `xarray` objects for as long as possible;
+- chronological train/validation/test splitting happens before overlapping windows are created;
+- scalers are fit only on training windows;
+- tensors are created only at the model boundary;
+- experiment outputs include configuration, dataset-contract metadata, metrics, prediction CSVs, graph images, and lead-day diagnostics.
 
-Essa abordagem permite realizar **aprendizado espaço-temporal**, sendo adequada para problemas de previsão meteorológica e eventos climáticos extremos.
+## Project Motivation
 
----
+Heavy precipitation events can create flooding, landslides, and infrastructure risk. Forecasting them requires models that can learn both:
 
-# Motivação
+- spatial dependencies between meteorological stations;
+- temporal dependencies across atmospheric variables.
 
-Eventos de precipitação intensa têm se tornado mais frequentes devido às mudanças climáticas, podendo causar:
+Graph-based models represent stations as nodes and spatial relationships as edges, while recurrent and attention-based temporal models learn from the historical sequence of meteorological features.
 
-- enchentes
-- deslizamentos de terra
-- danos à infraestrutura
+## Repository Layout
 
-Modelos tradicionais muitas vezes apresentam dificuldades para capturar simultaneamente:
-
-- relações espaciais entre diferentes estações
-- evolução temporal das variáveis atmosféricas
-
-As **Graph Neural Networks (GNN)** permitem modelar relações espaciais em forma de grafos, enquanto **LSTM** são eficazes para aprender padrões temporais em séries temporais.
-
-A combinação dessas duas arquiteturas permite capturar **dependências espaço-temporais complexas**.
-
----
-
-# Arquitetura do Modelo
-
-O modelo possui dois componentes principais.
-
-## GNN – Aprendizado Espacial
-
-A GNN modela a relação espacial entre as estações meteorológicas.
-
-- Cada **estação é representada como um nó do grafo**
-- As **arestas representam relações espaciais** (por exemplo, distância ou correlação)
-
-A GNN gera **representações espaciais (embeddings)** para cada estação.
-
----
-
-## LSTM – Aprendizado Temporal
-
-A LSTM recebe sequências temporais das variáveis meteorológicas e aprende a evolução dos padrões atmosféricos ao longo do tempo.
-
-Entrada típica:
-
-```
-[variáveis meteorológicas de t-H até t]
-```
-
-Saída:
-
-```
-precipitação em t+1
-```
-
----
-
-## Fluxo Geral do Modelo
-
-```
-Variáveis meteorológicas
-        │
-        ▼
-Graph Neural Network
- (relações espaciais)
-        │
-        ▼
-      LSTM
- (dinâmica temporal)
-        │
-        ▼
-Previsão de precipitação
-```
-
----
-
-# Estrutura do Repositório
-
-```
+```text
 LSTM-GNN/
-
-├── data/              # dados e pré-processamento
-├── models/            # arquiteturas GNN e LSTM
-├── training/          # scripts de treinamento
-├── evaluation/        # métricas e avaliação
-├── notebooks/         # experimentos e análise exploratória
-├── utils/             # funções auxiliares
-└── README.md
+|-- src/
+|   |-- Data/          # Dataset paths, ERA5 feature extraction, windowing, scaling, and dataset CLIs.
+|   |-- Evaluation/    # Metrics, plotting style, experiment outputs, and comparison utilities.
+|   |-- Graph/         # Station graph construction, adjacency matrices, KNN/distance topology, and graph plots.
+|   |-- Models/        # GLSTM cells/models and graph-temporal Transformer definitions.
+|   |-- Training/      # Training loops, model/loss resolution, run summaries, and prediction collection.
+|   |-- run_experiment.py
+|   |-- run_benchmark_model.py
+|   `-- precompute_daily_datasets.py
+|-- Datasets/
+|   |-- raw/           # Local raw NetCDF datasets; ignored except .gitkeep.
+|   |-- processed/     # Local processed Zarr stores; ignored except .gitkeep.
+|   |-- nc_files/      # Legacy NetCDF location used by older notebooks.
+|   `-- dados_inmet/   # INMET station/catalog CSV inputs.
+|-- Notebooks/         # Exploratory notebooks and legacy analyses.
+|-- Experiments/       # Generated run outputs; ignored by git.
+|-- PLOTS/             # Generated exploratory figures.
+|-- AGENT.md           # Maintainer/development guidance for future agents.
+`-- readme.md
 ```
 
----
+Each source subfolder has its own `documentation.md` file describing the files, functions, input conventions, dependencies, and role in the pipeline.
 
-# Variáveis de Entrada
+## Data Contract
 
-As variáveis meteorológicas utilizadas podem incluir:
+The maintained dataset convention is:
 
-- temperatura do ar
-- ponto de orvalho (dew point)
-- pressão atmosférica
-- umidade relativa
-- velocidade do vento
-- precipitação passada
+- `Datasets/raw/`: raw meteorological NetCDF files (`*.nc`).
+- `Datasets/processed/`: processed Zarr stores (`*.zarr`) for faster repeated reads.
+- `Datasets/processed/daily/`: daily aggregated Zarr caches generated from the raw ERA5 datasets.
+- `Datasets/nc_files/`: legacy NetCDF location kept for older notebooks.
+- `Datasets/dados_inmet/`: station-level INMET CSV files and the station catalog.
 
-Essas variáveis são fornecidas como **séries temporais para cada estação meteorológica**.
+The central loader is `src/Data/dataset_paths.py`. It resolves datasets by explicit path, file name, or token such as `precipitation`, `temp`, `sh`, `wind`, or `vv`.
 
----
+## Date-Aware Pipeline
 
-# Instalação
+The main pipeline lives in `src/Data/temporal_dataset.py`:
 
-Clone o repositório:
+1. Load the INMET station catalog.
+2. Open raw or processed ERA5 datasets through the central path API.
+3. Aggregate hourly/forecast-step data into daily feature datasets when needed.
+4. Sample gridded ERA5 variables at station coordinates.
+5. Align all feature arrays on common `time` and `station` coordinates.
+6. Split the raw dated time axis chronologically.
+7. Create windows independently inside train, validation, and test blocks.
+8. Fit feature/target scalers on training windows only.
+9. Convert `[sample, lag, station, feature]` and `[sample, lead_day, station]` xarray windows to Torch tensors only before training.
 
-```bash
+This preserves `time`, `sample_start_time`, `input_end_time`, and per-lead `target_time` metadata for diagnostics and plots.
+
+## Main Experiment Runner
+
+The primary entry point is:
+
+```powershell
+python src/run_experiment.py
+```
+
+Edit the constants at the top of `src/run_experiment.py` to choose:
+
+- date range and station subset;
+- meteorological feature switches;
+- window size and forecast horizon;
+- normalization/scaler policy;
+- regression metric policy (`METRIC_STANDARD=None` or `"modified"`) and the
+  physical precipitation cutoff `METRIC_THRESHOLD` in millimetres;
+- model type (`glstm` or `transformer`);
+- graph KNN size and adjacency behavior;
+- optional GLSTM diagonal/self-loop calibration (`LEARN_SELF_ATT`);
+- optional GLSTM cross-node standard-deviation learning (`LEARN_STD`), or an `EMPTY_GRAPH=True` baseline with an independent LSTM/head per station and no graph edges;
+- training loss, learning rate, patience, batch size, and output folder.
+
+The runner writes outputs under `Experiments/run_experiment/<run_name>/`, including:
+
+- `parameters.md`, with all source-selectable settings and their effective values;
+- `config.json`;
+- `dataset_contract.json`;
+- `run_summary.json`;
+- `test_metrics.json`;
+- `test_metrics_physical_scale.json`;
+- `hist.pt` and model checkpoint files;
+- prediction CSVs by lead day;
+- learned cross-node standard-deviation predictions by lead day when `LEARN_STD=True`;
+- prediction overview plots;
+- per-lead-day diagnostics;
+- initial graph and learned topology images.
+
+## Benchmark Models
+
+Run statistical and naive baselines over the same dated data, station selection,
+chronological split, window size, and forecast horizon used by `run_experiment.py`:
+
+```powershell
+python src/run_benchmark_model.py
+```
+
+Edit `BENCHMARK_MODELS` at the top of the file to select one or more of
+`auto_arima`, `persistence_station`, `seasonal_persistence`, `station_mean`,
+`station_median`, and `zero`. AutoARIMA is fitted independently per station,
+selects its order from the training block only, and is evaluated with a rolling
+forecast origin. Outputs are written below `Experiments/run_benchmark_model/`
+with GLSTM-compatible test metrics and prediction diagnostics.
+
+## Dataset Precomputation
+
+To convert raw NetCDF files to processed Zarr stores:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m Data.process_datasets --all
+```
+
+To precompute daily caches consumed by `run_experiment.py`:
+
+```powershell
+python src/precompute_daily_datasets.py
+python src/precompute_daily_datasets.py precipitation temp sh --overwrite
+```
+
+Daily caches are stored under `Datasets/processed/daily/*.zarr`.
+
+## Installation
+
+Recommended Python versions are 3.10 to 3.12.
+
+```powershell
 git clone https://github.com/brunoscaratti99/LSTM-GNN.git
 cd LSTM-GNN
-```
-
-Crie um ambiente virtual:
-
-```bash
-conda create -n gnn_lstm python=3.10
-conda activate gnn_lstm
-```
-
-Instale as dependências:
-
-```bash
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-Principais bibliotecas utilizadas:
+If a custom CUDA build is required, install `torch` and `torch-geometric` from their official instructions first, then run `pip install -r requirements.txt`.
 
-- PyTorch
-- PyTorch Geometric
-- NumPy
-- Pandas
-- Xarray
-- Scikit-learn
+Main libraries:
 
----
+- PyTorch and PyTorch Geometric;
+- NumPy, Pandas, SciPy, and scikit-learn;
+- Xarray, NetCDF4, Zarr, and Dask;
+- Matplotlib, Seaborn, NetworkX, and tqdm.
 
-# Treinamento
+## Model Families
 
-Exemplo de execução do treinamento:
+The repository currently includes:
 
-```python
-python train.py
+- `GLSTM_v1` and `GLSTM_v2`: graph-aware LSTM variants over station nodes.
+- `GraphTemporalTransformer_v1`: a graph-temporal Transformer that mixes station adjacency with temporal attention.
+- Utility components such as `LearnableAdjacency` and `GraphResidualMixer`.
+
+Inputs generally follow:
+
+- before windowing: `[time, station, feature]`;
+- after windowing: `[batch, window, station, feature]`;
+- targets: `[batch, horizon, station]`.
+
+## Evaluation
+
+Evaluation utilities report:
+
+- MSE, RMSE, MAE, MAPE, and R2;
+- global and per-lead-day metrics;
+- prediction-vs-actual plots;
+- station-specific time-series plots;
+- graph topology plots and adjacency heatmaps;
+- experiment convergence overlays.
+
+Prediction outputs are inverse-transformed to precipitation units when a target scaler is used.
+
+Set `METRIC_STANDARD="modified"` to calculate MSE/RMSE, MAE, and R2 only for
+observations with `target_mm > METRIC_THRESHOLD`. The strict selection is made
+from the observed precipitation, never from the prediction. The same filtered
+validation metrics drive scheduler/checkpoint/early-stopping patience; if
+`ADAPTATIVE_LR_METRIC` is `loss` or `mape`, modified RMSE is used as the
+patience monitor. `METRIC_STANDARD=None` preserves the legacy all-target metric
+and early-stopping behavior.
+
+### RS maps for a Beamer animation
+
+To animate a target-date period for one fixed forecast lead:
+
+```powershell
+python src/export_rs_animation_maps.py --run-dir "Experiments/run_experiment/<run>" --start-date 2021-01-01 --end-date 2021-01-31 --lead-day 3
 ```
 
-Etapas típicas do treinamento:
+The date bounds apply inclusively to `target_time`. Use the legacy `--sample 0`
+mode to animate D+1 through D+H for one forecast origin, or `--sample -1` for
+the last test sample. The command reads the run's existing
+`test_predictions_by_lead_day.csv` and `inference_state.json`; it does not train
+or rerun the model. Its default output is
+`<run>/rs_animation_frames/lead_day_XX__START__END/`, containing:
 
-1. Pré-processamento dos dados
-2. Construção do grafo das estações
-3. Geração de janelas temporais (sliding windows)
-4. Treinamento do modelo
-5. Validação
+- `Predict/frame_001.png`, `frame_002.png`, ...;
+- `Real/frame_001.png`, `frame_002.png`, ...;
+- `Residual/frame_001.png`, `frame_002.png`, ..., showing `predicted - real` in mm (red positive, white near zero, blue negative);
+- `animation_manifest.json`, with the shared color limits and frame dates;
+- `beamer_animate_example.tex`, ready to copy into the presentation, including a residual-only animation frame.
 
----
+Predicted and real frames share a fixed white-to-blue scale, where white is
+0 mm; its color bar appears only in the `Real` frame on the right. Both maps
+have a pure-white RS background and a minimal two-line title: `Predict` or
+`Real` above the target date in `YYYY-MM-DD` format. Stations are circular nodes
+and graph edges are not rendered. Add
+`\usepackage{animate}` to the Beamer preamble; the generated `animateinline`
+example advances each predicted/real PNG pair in perfect synchronization.
 
-# Métricas de Avaliação
+### Real versus predicted time period
 
-O desempenho do modelo pode ser avaliado utilizando:
+To reload a trained run, predict an inclusive target-date period, and save one
+PNG with the real and predicted station series:
 
-- **MAE** – Mean Absolute Error
-- **MSE** – Mean Squared Error
-- **RMSE** – Root Mean Squared Error
-- **R²** – Coeficiente de determinação
+```powershell
+python plot_timeperiod.py --run-dir "Experiments/run_experiment/<run>" --start-date 2024-05-01 --end-date 2024-06-01 --station "Porto Alegre"
+```
 
----
+The default output is `<run>/timeperiod_YYYYMMDD_YYYYMMDD.png`. It contains one
+panel per forecast lead day. Add `--lead-day 3` to plot only D+3, or `--output`
+to choose another PNG path. The script runs a backtest from the saved model and
+does not modify the run directory with intermediate inference files.
 
-# Trabalhos Futuros
+For presentation-ready, separate Porto Alegre (Jardim Botânico) figures, use:
 
-Possíveis extensões do projeto incluem:
+Set `START_DATE`, `END_DATE`, `RUN_PATH`, and `LEAD_DAYS` in the configuration
+block at the top of `create_timeseries_plot.py`. Running the file from Python or
+an IDE reads the run's saved `test_predictions_by_lead_day.csv` and writes
+one true-versus-predicted PNG per requested lead day to
+`<run>/plots_presentation/`. The date bounds are inclusive and the default lead
+days are D+1 and D+5. These presentation-ready PNGs omit the chart titles and
+the redundant lower `Target date` label while retaining formatted date ticks,
+the precipitation axis, and the real/predicted legend.
 
-- uso de **Graph Attention Networks (GAT)**
-- **matriz de adjacência dinâmica**
-- previsão **multi-passos**
-- detecção de **eventos extremos de precipitação**
-- integração com **dados de reanálise climática (ERA5)**
+## Verification
 
----
+When dependency state is uncertain, use a syntax-only check:
 
-# Citação
+```powershell
+python -B -c "from pathlib import Path; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in Path('src').rglob('*.py')]"
+```
 
-Caso utilize este repositório em sua pesquisa, cite:
+For a full run, make sure the required ERA5 datasets are available under `Datasets/raw/` or `Datasets/processed/`.
+
+## Development Notes
+
+- Keep new maintained code under `src/` whenever possible.
+- Avoid committing generated datasets, `Experiments/`, `PLOTS/`, `__pycache__/`, or notebook execution artifacts.
+- Prefer the central dataset API instead of hard-coded paths to `Datasets/nc_files/`.
+- Preserve the chronology-first split and train-only fitting policy unless a task explicitly changes the experiment design.
+
+## Citation
 
 ```bibtex
 @software{lstm_gnn_precipitation,
   author = {Veloso, Bruno},
-  title = {Previsão de Precipitação com GNN + LSTM},
+  title = {LSTM-GNN Precipitation Forecasting},
   year = {2026},
   url = {https://github.com/brunoscaratti99/LSTM-GNN}
 }
 ```
 
----
+## License
 
-# Licença
-
-Este projeto está disponível sob a licença **MIT**.
+This project is available under the MIT License.

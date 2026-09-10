@@ -1,0 +1,235 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,landscape,margin=1.35cm]{geometry}
+\usepackage{array}
+\usepackage{longtable}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\setlength{\tabcolsep}{3.5pt}
+\renewcommand{\arraystretch}{1.18}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+\begin{document}
+
+{\Large \textbf{Auditoria dos datasets ERA5 em \code{Datasets/nc_files/}}}
+
+\textbf{Data da auditoria:} 13/07/2026.
+
+\textbf{Escopo:} leitura de metadados dos arquivos NetCDF presentes em
+\code{Datasets/nc_files/}. A auditoria usa cabeçalhos, dimensões, coordenadas e
+atributos das variáveis; os campos meteorológicos completos não foram
+materializados em memória. A pasta \code{Datasets/nc_files/} é tratada no projeto
+como localização legada de NetCDF, portanto este documento registra o acervo sem
+alterar os datasets.
+
+\section*{Resumo dos arquivos}
+
+\footnotesize
+\begin{longtable}{|L{4.3cm}|L{2.2cm}|L{4.4cm}|L{5.9cm}|L{5.3cm}|L{1.6cm}|}
+\hline
+\textbf{Arquivo} &
+\textbf{Variável principal} &
+\textbf{Descrição e unidade} &
+\textbf{Dimensões principais} &
+\textbf{Data inicial e final} &
+\textbf{Tamanho} \\
+\hline
+\endfirsthead
+\hline
+\textbf{Arquivo} &
+\textbf{Variável principal} &
+\textbf{Descrição e unidade} &
+\textbf{Dimensões principais} &
+\textbf{Data inicial e final} &
+\textbf{Tamanho} \\
+\hline
+\endhead
+
+\code{cape_88-26.nc} &
+\code{cape} &
+Convective available potential energy; \code{J kg**-1} &
+3 dimensões: \code{time}=335059, \code{latitude}=41, \code{longitude}=61 &
+1988-01-01 00:00 até 2026-03-22 18:00; amostra temporal de 1 h &
+3.36 GB \\
+\hline
+
+\code{era5_precipitation_80-26.nc} &
+\code{tp} &
+Total precipitation; \code{m} &
+4 dimensões: \code{time}=33653, \code{step}=12, \code{latitude}=41, \code{longitude}=61 &
+1979-12-31 18:00 até 2026-01-24 18:00; amostra em \code{time} de 12 h, com 12 passos em \code{step} &
+4.04 GB \\
+\hline
+
+\code{era5_sh_00-25.nc} &
+\code{q} &
+Specific humidity; \code{kg kg**-1} &
+4 dimensões: \code{time}=227928, \code{isobaricInhPa}=2, \code{latitude}=41, \code{longitude}=61 &
+2000-01-01 00:00 até 2025-12-31 23:00; amostra temporal de 1 h &
+4.56 GB \\
+\hline
+
+\code{era5_wind_14-25.nc} &
+\code{u}, \code{v} &
+U/V component of wind; \code{m s**-1} &
+4 dimensões: \code{time}=105192, \code{isobaricInhPa}=2, \code{latitude}=41, \code{longitude}=61 &
+2014-01-01 00:00 até 2025-12-31 23:00; amostra temporal de 1 h &
+4.21 GB \\
+\hline
+
+\code{temp_99-25.nc} &
+\code{d2m}, \code{t2m} &
+2 metre dewpoint temperature e 2 metre temperature; \code{K} &
+3 dimensões: \code{time}=236688, \code{latitude}=41, \code{longitude}=61 &
+1999-01-01 00:00 até 2025-12-31 23:00; amostra temporal de 1 h &
+4.74 GB \\
+\hline
+
+\code{vv_94-25.nc} &
+\code{w} &
+Vertical velocity; \code{Pa s**-1} &
+4 dimensões: \code{time}=280512, \code{isobaricInhPa}=3, \code{latitude}=41, \code{longitude}=61 &
+1994-01-01 00:00 até 2025-12-31 23:00; amostra temporal de 1 h &
+8.42 GB \\
+\hline
+
+\end{longtable}
+\normalsize
+
+\section*{Variáveis de dados}
+
+\footnotesize
+\begin{longtable}{|L{4.3cm}|L{1.3cm}|L{4.7cm}|L{2.0cm}|L{5.5cm}|L{1.2cm}|L{1.4cm}|}
+\hline
+\textbf{Arquivo} &
+\textbf{Var.} &
+\textbf{Nome longo} &
+\textbf{Unidade} &
+\textbf{Standard name} &
+\textbf{Dims} &
+\textbf{Tipo} \\
+\hline
+\endfirsthead
+\hline
+\textbf{Arquivo} &
+\textbf{Var.} &
+\textbf{Nome longo} &
+\textbf{Unidade} &
+\textbf{Standard name} &
+\textbf{Dims} &
+\textbf{Tipo} \\
+\hline
+\endhead
+
+\code{cape_88-26.nc} & \code{cape} & Convective available potential energy & \code{J kg**-1} & \code{unknown} & 3 & \code{float32} \\
+\hline
+\code{era5_precipitation_80-26.nc} & \code{tp} & Total precipitation & \code{m} & \code{unknown} & 4 & \code{float32} \\
+\hline
+\code{era5_sh_00-25.nc} & \code{q} & Specific humidity & \code{kg kg**-1} & \code{specific_humidity} & 4 & \code{float32} \\
+\hline
+\code{era5_wind_14-25.nc} & \code{u} & U component of wind & \code{m s**-1} & \code{eastward_wind} & 4 & \code{float32} \\
+\hline
+\code{era5_wind_14-25.nc} & \code{v} & V component of wind & \code{m s**-1} & \code{northward_wind} & 4 & \code{float32} \\
+\hline
+\code{temp_99-25.nc} & \code{d2m} & 2 metre dewpoint temperature & \code{K} & \code{unknown} & 3 & \code{float32} \\
+\hline
+\code{temp_99-25.nc} & \code{t2m} & 2 metre temperature & \code{K} & \code{unknown} & 3 & \code{float32} \\
+\hline
+\code{vv_94-25.nc} & \code{w} & Vertical velocity & \code{Pa s**-1} & \code{lagrangian_tendency_of_air_pressure} & 4 & \code{float32} \\
+\hline
+
+\end{longtable}
+\normalsize
+
+\section*{Grade espacial e coordenadas}
+
+\footnotesize
+\begin{longtable}{|L{4.3cm}|L{4.5cm}|L{4.5cm}|L{4.6cm}|L{5.3cm}|}
+\hline
+\textbf{Arquivo} &
+\textbf{Latitude} &
+\textbf{Longitude} &
+\textbf{Coordenada vertical ou superfície} &
+\textbf{Coordenadas auxiliares presentes} \\
+\hline
+\endfirsthead
+\hline
+\textbf{Arquivo} &
+\textbf{Latitude} &
+\textbf{Longitude} &
+\textbf{Coordenada vertical ou superfície} &
+\textbf{Coordenadas auxiliares presentes} \\
+\hline
+\endhead
+
+\code{cape_88-26.nc} &
+-35.0 a -25.0; 41 pontos; passo -0.25 grau &
+-60.0 a -45.0; 61 pontos; passo 0.25 grau &
+\code{surface} &
+\code{number}, \code{step}, \code{valid_time} \\
+\hline
+
+\code{era5_precipitation_80-26.nc} &
+-35.0 a -25.0; 41 pontos; passo -0.25 grau &
+-60.0 a -45.0; 61 pontos; passo 0.25 grau &
+\code{surface}; dimensão \code{step}=12 &
+\code{number}, \code{step}, \code{valid_time} \\
+\hline
+
+\code{era5_sh_00-25.nc} &
+-35.0 a -25.0; 41 pontos; passo -0.25 grau &
+-60.0 a -45.0; 61 pontos; passo 0.25 grau &
+\code{isobaricInhPa}=2 níveis: 1000, 850 hPa &
+\code{number}, \code{step}, \code{valid_time} \\
+\hline
+
+\code{era5_wind_14-25.nc} &
+-35.0 a -25.0; 41 pontos; passo -0.25 grau &
+-60.0 a -45.0; 61 pontos; passo 0.25 grau &
+\code{isobaricInhPa}=2 níveis: 850, 500 hPa &
+\code{number}, \code{step}, \code{valid_time} \\
+\hline
+
+\code{temp_99-25.nc} &
+-35.0 a -25.0; 41 pontos; passo -0.25 grau &
+-60.0 a -45.0; 61 pontos; passo 0.25 grau &
+\code{surface} &
+\code{number}, \code{step}, \code{valid_time} \\
+\hline
+
+\code{vv_94-25.nc} &
+-35.0 a -25.0; 41 pontos; passo -0.25 grau &
+-60.0 a -45.0; 61 pontos; passo 0.25 grau &
+\code{isobaricInhPa}=3 níveis: 850, 500, 300 hPa &
+\code{number}, \code{step}, \code{valid_time} \\
+\hline
+
+\end{longtable}
+\normalsize
+
+\section*{Observações principais}
+
+\begin{itemize}
+    \item Todos os arquivos declaram convenção \code{CF-1.7} e instituição
+    \code{European Centre for Medium-Range Weather Forecasts}.
+    \item A grade horizontal é comum a todos os arquivos: 41 latitudes por 61
+    longitudes, cobrindo aproximadamente -35 a -25 graus de latitude e -60 a
+    -45 graus de longitude, com resolução nominal de 0.25 grau.
+    \item A maioria dos arquivos tem amostragem horária na coordenada
+    \code{time}. A exceção é \code{era5_precipitation_80-26.nc}, que combina
+    \code{time} a cada 12 horas com \code{step}=12; para esse caso, a coordenada
+    derivada \code{valid_time} deve ser considerada ao alinhar precipitação com
+    variáveis horárias.
+    \item As variáveis em níveis de pressão usam \code{isobaricInhPa}: umidade
+    específica tem níveis 1000 e 850 hPa; vento tem níveis 850 e 500 hPa; e
+    velocidade vertical tem níveis 850, 500 e 300 hPa.
+    \item Os arquivos \code{temp_99-25.nc} e \code{era5_wind_14-25.nc} carregam
+    duas variáveis meteorológicas cada; rotinas de extração devem tratar ambas
+    explicitamente para não perder canais de entrada.
+\end{itemize}
+
+\end{document}

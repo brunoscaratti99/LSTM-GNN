@@ -1,0 +1,70 @@
+{
+  "knn_distances_km": {
+    "min": 4.694896655670731,
+    "median": 75.57054662059353,
+    "max": 224.41384310612554,
+    "mean": 80.9922142748653
+  },
+  "directed_edges": 388,
+  "train": {
+    "shape": [
+      5698,
+      62
+    ],
+    "start": "2000-01-01",
+    "end": "2015-08-07",
+    "nan": 0,
+    "mean": 4.581845984864229,
+    "std": 9.73575388702696,
+    "dry_le_1_fraction": 0.6097498839434323,
+    "heavy_gt_35_fraction": 0.022800869575063124
+  },
+  "val": {
+    "shape": [
+      1899,
+      62
+    ],
+    "start": "2015-08-08",
+    "end": "2020-10-18",
+    "nan": 0,
+    "mean": 4.429095662604671,
+    "std": 9.76353787509827,
+    "dry_le_1_fraction": 0.6266201226451953,
+    "heavy_gt_35_fraction": 0.022881312745247923
+  },
+  "test": {
+    "shape": [
+      1900,
+      62
+    ],
+    "start": "2020-10-19",
+    "end": "2025-12-31",
+    "nan": 0,
+    "mean": 4.407109928762568,
+    "std": 10.129949901583505,
+    "dry_le_1_fraction": 0.6341850594227504,
+    "heavy_gt_35_fraction": 0.024745331069609508
+  },
+  "global_weighted_constant_mm": 10.98103985939396,
+  "identical_target_pairs": [
+    [
+      "BAGE",
+      "BAGE - CENTRO"
+    ],
+    [
+      "CHARQUEADAS",
+      "PARQUE ELDORADO"
+    ]
+  ],
+  "utc_day_correction_2024": {
+    "shape": [
+      366,
+      62
+    ],
+    "mae": 0.32193644345594674,
+    "p95_abs": 1.8410682678222656,
+    "max_abs": 23.769378662109375,
+    "fraction_abs_gt_1": 0.09364533756389917,
+    "changed_class_gt_35": 75
+  }
+}

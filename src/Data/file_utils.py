@@ -1,5 +1,6 @@
 import os
 import re
+import pandas as pd
 
 def change_comma(frame):
   new_frame = frame.copy()
@@ -21,6 +22,9 @@ def format_path(path):
         os.makedirs(path)
     return path
 
+
+#def date_from_index(start_date, batch, window_size, idx):
+#    return pd.to_datetime(start_date) + pd.Timedelta(days=batch*window_size+idx)
 
 
 def create_next_experiment_folder(base_path):

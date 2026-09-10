@@ -3,6 +3,7 @@ from sklearn.neighbors import NearestNeighbors
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
+import seaborn as sns
 from torch_geometric.data import Data
 from torch_geometric.utils import to_networkx
 from torch_geometric.utils import to_undirected, coalesce
@@ -10,12 +11,44 @@ import sys
 sys.path.append("../src")
 
 from Data.feature_extraction import haversine_km
+from Evaluation.plot_style import apply_seaborn_theme, save_figure
+
+
+apply_seaborn_theme()
+
+def max_graph_aggregate(H_prev, A, include_self=True):
+    # H_prev: [B, H, N]
+    # A: [N, N]
+
+    if not include_self:
+        A = A.clone()
+        A.fill_diagonal_(0)
+
+    mask = (A > 0)  # [N, N]
+    H_nodes = H_prev.transpose(1, 2)  # [B, N, H]
+
+    # [B, src, dst, H]
+    msgs = H_nodes.unsqueeze(2).expand(-1, -1, A.size(1), -1)
+
+    msgs = msgs.masked_fill(
+        ~mask.unsqueeze(0).unsqueeze(-1),
+        float("-inf")
+    )
+
+    H_graph = msgs.amax(dim=1)  # max sobre os vizinhos src -> [B, dst, H]
+    H_graph = torch.where(torch.isfinite(H_graph), H_graph, torch.zeros_like(H_graph))
+
+    return H_graph.transpose(1, 2)  # [B, H, N]
+
 
 
 def adjacency_matrix(N, edge_index, edge_weight=None, symmetric=True):
     A = torch.zeros(N, N, device=edge_index.device)
     if edge_weight is None:
         edge_weight = torch.ones(edge_index.shape[1], device=edge_index.device)
+
+    if edge_index.max() == 0:
+        return torch.eye(N, device=edge_index.device)
 
     src, dst = edge_index  # edge_index[0] e edge_index[1]
     A[src, dst] = edge_weight
@@ -142,6 +175,136 @@ def distance_matrix_from_lat_lon(latitudes, longitudes, dtype=torch.float32, dev
     return distances.to(dtype=dtype, device=device)
 
 
+STATION_SIMILARITY_CHOICES = frozenset(
+    {"gaussian", "ones", "inverse_distance", "climatology_correlation"}
+)
+
+
+def normalize_station_similarity(similarity: str) -> str:
+    """Validate and normalize a station-similarity method name."""
+    if not isinstance(similarity, str):
+        raise TypeError("station_similarity must be a string.")
+    normalized = similarity.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized not in STATION_SIMILARITY_CHOICES:
+        available = ", ".join(sorted(STATION_SIMILARITY_CHOICES))
+        raise ValueError(
+            f"Unsupported station_similarity={similarity!r}. Available values: {available}."
+        )
+    return normalized
+
+
+def _climatology_correlation_similarity(climatology, n_stations: int) -> torch.Tensor:
+    """Return non-negative Pearson station similarities from training precipitation.
+
+    Negative correlations do not represent an attractive edge in the current
+    non-negative adjacency architecture, so they receive zero similarity.
+    Invalid/constant station series are treated the same way.  The caller
+    subsequently floors selected edge weights to keep the chosen topology.
+    """
+    values = np.asarray(
+        climatology.detach().cpu().numpy() if torch.is_tensor(climatology) else climatology,
+        dtype=np.float64,
+    )
+    if values.ndim != 2 or values.shape[1] != n_stations:
+        raise ValueError(
+            "climatology must have shape [time, station] with one column per station."
+        )
+
+    correlation = np.zeros((n_stations, n_stations), dtype=np.float64)
+    np.fill_diagonal(correlation, 1.0)
+    for source in range(n_stations):
+        source_values = values[:, source]
+        for destination in range(source + 1, n_stations):
+            destination_values = values[:, destination]
+            valid = np.isfinite(source_values) & np.isfinite(destination_values)
+            if valid.sum() >= 2:
+                source_valid = source_values[valid]
+                destination_valid = destination_values[valid]
+                if (
+                    np.std(source_valid) > 0.0
+                    and np.std(destination_valid) > 0.0
+                ):
+                    value = float(np.corrcoef(source_valid, destination_valid)[0, 1])
+                    if np.isfinite(value):
+                        correlation[source, destination] = value
+                        correlation[destination, source] = value
+
+    return torch.from_numpy(np.clip(correlation, 0.0, 1.0).astype(np.float32))
+
+
+def station_similarity_edge_weights(
+    stations,
+    edge_index,
+    *,
+    station_similarity: str = "gaussian",
+    gaussian_sigma_km: float = 100.0,
+    climatology=None,
+    minimum_weight: float = 1e-4,
+) -> torch.Tensor:
+    """Build non-negative initial weights, aligned to a station ``edge_index``.
+
+    The station order is exactly ``stations.keys()``.  Returned values are for
+    off-diagonal edges only; :func:`adjacency_matrix` always supplies the
+    self-loop of one.  Values are floored at ``minimum_weight`` so a zero
+    similarity never silently removes an edge from a locked KNN topology.
+
+    ``gaussian`` uses ``exp(-d_ij**2 / (2 * sigma**2))`` with haversine
+    distance in kilometres.  ``inverse_distance`` uses ``1 / d_ij``.  The
+    model's positive residual parameterization accepts that physical scale
+    directly, rather than forcing it into a sigmoid probability.
+    """
+    station_similarity = normalize_station_similarity(station_similarity)
+    if not torch.is_tensor(edge_index) or edge_index.ndim != 2 or edge_index.shape[0] != 2:
+        raise ValueError("edge_index must be a torch tensor with shape [2, E].")
+    if edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.float32, device=edge_index.device)
+    if minimum_weight <= 0.0 or not np.isfinite(minimum_weight):
+        raise ValueError("minimum_weight must be finite and greater than zero.")
+
+    station_names = list(stations.keys())
+    n_stations = len(station_names)
+    if n_stations < 1:
+        raise ValueError("stations must contain at least one station.")
+    if int(edge_index.min()) < 0 or int(edge_index.max()) >= n_stations:
+        raise ValueError("edge_index contains an index outside the station mapping.")
+
+    if station_similarity == "ones":
+        similarity_matrix = torch.ones(
+            (n_stations, n_stations), dtype=torch.float32, device=edge_index.device
+        )
+    elif station_similarity == "climatology_correlation":
+        if climatology is None:
+            raise ValueError(
+                "station_similarity='climatology_correlation' requires training climatology."
+            )
+        similarity_matrix = _climatology_correlation_similarity(
+            climatology, n_stations
+        ).to(device=edge_index.device)
+    else:
+        latitudes = [float(stations[name][0]) for name in station_names]
+        longitudes = [float(stations[name][1]) for name in station_names]
+        distances = distance_matrix_from_lat_lon(
+            latitudes, longitudes, dtype=torch.float32, device=edge_index.device
+        )
+        if station_similarity == "gaussian":
+            if gaussian_sigma_km <= 0.0 or not np.isfinite(gaussian_sigma_km):
+                raise ValueError("gaussian_sigma_km must be finite and greater than zero.")
+            similarity_matrix = torch.exp(
+                -(distances.square()) / (2.0 * float(gaussian_sigma_km) ** 2)
+            )
+        else:  # inverse_distance
+            similarity_matrix = torch.zeros_like(distances)
+            positive_distance = distances > 0.0
+            similarity_matrix[positive_distance] = 1.0 / distances[positive_distance]
+            similarity_matrix.fill_diagonal_(1.0)
+
+    source, destination = edge_index
+    weights = similarity_matrix[source, destination]
+    if not torch.isfinite(weights).all() or (weights < 0.0).any():
+        raise ValueError("station similarity produced invalid edge weights.")
+    return weights.clamp_min(float(minimum_weight)).to(dtype=torch.float32)
+
+
 def exp_distance_adjacency_matrix(
     N,
     edge_index,
@@ -245,20 +408,35 @@ def knn_topology(stations, k=4):
     return edge_index, pos
     
 
-def plot_graph(N, edge_index, pos):
+def plot_graph(N, edge_index, pos, output_path=None, show=True):
     graph_data = Data(x=torch.zeros(N), edge_index=edge_index)
 
     G = to_networkx(graph_data, to_undirected=True)
-    
-    plt.figure(figsize=(30,30))
+    palette = sns.color_palette("crest", 5)
+
+    fig, ax = plt.subplots(figsize=(18, 18))
     nx.draw(G, pos,
             with_labels=True,
-            node_color='lightblue',
-            node_size=700,
-            width=3,
-            font_weight='bold')
-    nx.draw_networkx_labels(G, pos, font_color='black')
-    plt.show()
+            node_color=[palette[3]],
+            edge_color=palette[1],
+            node_size=620,
+            width=1.8,
+            alpha=0.9,
+            font_weight='bold',
+            font_size=8,
+            ax=ax)
+    nx.draw_networkx_labels(G, pos, font_color="#1f2933", font_size=8, ax=ax)
+    ax.set_title("Initial station graph topology", fontsize=18, pad=18)
+    ax.set_axis_off()
+    try:
+        if output_path is not None:
+            save_figure(fig, output_path, dpi=190)
+        if show:
+            plt.show()
+    finally:
+        if not show:
+            plt.close(fig)
+    return output_path
 
 def distance_graph(stations, criterion=120):
     N = len(stations)

@@ -1,0 +1,155 @@
+{
+  "glstm_sweep_20260907_090603": {
+    "epochs": 200,
+    "selected_epoch": 196,
+    "selected_val_loss": 282.41937255859375,
+    "min_loss_epoch": 38,
+    "min_val_loss": 244.349853515625,
+    "selected_train_prediction_loss": 200.1649932861328,
+    "selected_val_prediction_loss": 249.88792419433594,
+    "final_train_prediction_loss": 203.97373962402344,
+    "final_val_prediction_loss": 231.7843780517578,
+    "prior_used": false,
+    "raw_edge_weights": {
+      "min": 0.48264825344085693,
+      "median": 0.5005618929862976,
+      "max": 0.5447574257850647,
+      "mean": 0.5012325644493103
+    },
+    "normalized_diagonal": {
+      "min": 0.1661359965801239,
+      "median": 0.2501590847969055,
+      "max": 0.2905793786048889,
+      "mean": 0.2476164996623993
+    },
+    "normalized_offdiag_row_sum": {
+      "min": 0.6187930107116699,
+      "median": 0.7551154494285583,
+      "max": 1.0302680730819702,
+      "mean": 0.7484531998634338
+    },
+    "auxiliary_std": {
+      "actual_mean": 4.1121857018616215,
+      "predicted_mean": 5.80266718150833,
+      "r2": -0.06085291953682059
+    }
+  },
+  "glstm_sweep_20260907_100511": {
+    "epochs": 347,
+    "selected_epoch": 196,
+    "selected_val_loss": 282.41937255859375,
+    "min_loss_epoch": 38,
+    "min_val_loss": 244.349853515625,
+    "selected_train_prediction_loss": 200.1649932861328,
+    "selected_val_prediction_loss": 249.88792419433594,
+    "final_train_prediction_loss": 156.72427368164062,
+    "final_val_prediction_loss": 270.739990234375,
+    "prior_used": false,
+    "raw_edge_weights": {
+      "min": 0.48264825344085693,
+      "median": 0.5005618929862976,
+      "max": 0.5447574257850647,
+      "mean": 0.5012325644493103
+    },
+    "normalized_diagonal": {
+      "min": 0.1661359965801239,
+      "median": 0.2501590847969055,
+      "max": 0.2905793786048889,
+      "mean": 0.2476164996623993
+    },
+    "normalized_offdiag_row_sum": {
+      "min": 0.6187930107116699,
+      "median": 0.7551154494285583,
+      "max": 1.0302680730819702,
+      "mean": 0.7484531998634338
+    },
+    "auxiliary_std": {
+      "actual_mean": 4.1121857018616215,
+      "predicted_mean": 5.80266718150833,
+      "r2": -0.06085291953682059
+    }
+  },
+  "glstm_sweep_20260907_114458": {
+    "epochs": 164,
+    "selected_epoch": 13,
+    "selected_val_loss": 251.9706573486328,
+    "min_loss_epoch": 18,
+    "min_val_loss": 247.21466064453125,
+    "selected_train_prediction_loss": 216.2699737548828,
+    "selected_val_prediction_loss": 224.04307556152344,
+    "final_train_prediction_loss": 51.71082305908203,
+    "final_val_prediction_loss": 289.4779357910156,
+    "prior_used": false,
+    "raw_edge_weights": {
+      "min": 0.4210045039653778,
+      "median": 0.5016047954559326,
+      "max": 0.5716829895973206,
+      "mean": 0.50175541639328
+    },
+    "normalized_diagonal": {
+      "min": 0.16757062077522278,
+      "median": 0.24722854793071747,
+      "max": 0.3077165186405182,
+      "mean": 0.24718014895915985
+    },
+    "normalized_offdiag_row_sum": {
+      "min": 0.6163623332977295,
+      "median": 0.7576590776443481,
+      "max": 1.0244919061660767,
+      "mean": 0.7490062713623047
+    },
+    "auxiliary_std": {
+      "actual_mean": 4.1121857018616215,
+      "predicted_mean": 4.722216794428706,
+      "r2": 0.08068137852498602
+    }
+  },
+  "glstm_sweep_20260907_121609": {
+    "epochs": 187,
+    "selected_epoch": 36,
+    "selected_val_loss": 267.467529296875,
+    "min_loss_epoch": 19,
+    "min_val_loss": 245.36534118652344,
+    "selected_train_prediction_loss": 190.70591735839844,
+    "selected_val_prediction_loss": 237.03623962402344,
+    "final_train_prediction_loss": 51.42766189575195,
+    "final_val_prediction_loss": 285.9870910644531,
+    "prior_used": true,
+    "raw_edge_weights": {
+      "min": 8.757368050282821e-05,
+      "median": 0.00010408458183519542,
+      "max": 0.00012792680354323238,
+      "mean": 0.000104001366707962
+    },
+    "normalized_diagonal": {
+      "min": 0.9989613890647888,
+      "median": 0.9993785619735718,
+      "max": 0.9995130896568298,
+      "mean": 0.9993496537208557
+    },
+    "normalized_offdiag_row_sum": {
+      "min": 0.000486910343170166,
+      "median": 0.000621497631072998,
+      "max": 0.001038968563079834,
+      "mean": 0.0006504029734060168
+    },
+    "prior_edge_weights": {
+      "min": 9.999999747378752e-05,
+      "median": 9.999999747378752e-05,
+      "max": 9.999999747378752e-05,
+      "mean": 9.999998292187229e-05
+    },
+    "initial_normalized_diagonal": {
+      "min": 0.9990010261535645,
+      "median": 0.99940025806427,
+      "max": 0.9995002150535583,
+      "mean": 0.9993746280670166
+    },
+    "auxiliary_std": {
+      "actual_mean": 4.1121857018616215,
+      "predicted_mean": 5.266138038817141,
+      "r2": -0.0068579245202378125
+    }
+  },
+  "first_two_checkpoints_equal": true
+}
