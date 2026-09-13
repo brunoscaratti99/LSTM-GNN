@@ -42,6 +42,7 @@ from Training.experiment_runner import (  # noqa: E402
     resolve_catalog_path,
     unpack_model_output,
 )
+from output_layout import logs_directory, resolve_run_artifact  # noqa: E402
 
 
 # Editable defaults. Command-line arguments override these values.
@@ -848,7 +849,7 @@ def _verify_legacy_reconstruction(
     target_scaler,
 ) -> bool:
     """Compare one reconstructed test prediction with the run's saved CSV."""
-    prediction_path = loaded.run_dir / "test_predictions_by_lead_day.csv"
+    prediction_path = resolve_run_artifact(loaded.run_dir, "test_predictions_by_lead_day.csv")
     if not prediction_path.exists():
         warnings.warn(
             "Legacy scaler state was reconstructed but could not be verified because "
@@ -926,17 +927,18 @@ def load_trained_experiment(
 ) -> LoadedExperiment:
     """Reconstruct a trained run from its config, contract, checkpoint, and scaler state."""
     run_dir = Path(run_dir).resolve()
-    config_path = run_dir / "config.json"
-    contract_path = run_dir / "dataset_contract.json"
-    checkpoint_path = run_dir / "model_state_dict.pt"
+    config_path = resolve_run_artifact(run_dir, "config.json")
+    contract_path = resolve_run_artifact(run_dir, "dataset_contract.json")
+    checkpoint_path = resolve_run_artifact(run_dir, "model_state_dict.pt")
     config_payload = _read_json(config_path)
     dataset_contract = _read_json(contract_path)
-    run_summary = _read_json(run_dir / "run_summary.json") if (run_dir / "run_summary.json").exists() else None
+    summary_path = resolve_run_artifact(run_dir, "run_summary.json")
+    run_summary = _read_json(summary_path) if summary_path.exists() else None
     config = _config_from_artifacts(config_payload, dataset_contract, run_summary)
     station_names = _contract_names(dataset_contract, "stations")
     feature_names = _contract_names(dataset_contract, "features")
 
-    state_path = run_dir / INFERENCE_STATE_FILENAME
+    state_path = resolve_run_artifact(run_dir, INFERENCE_STATE_FILENAME)
     inference_state = _read_json(state_path) if state_path.exists() else None
     if inference_state is not None:
         schema_version = int(inference_state.get("schema_version", -1))
@@ -1409,8 +1411,9 @@ def run_inference(
     destination = _create_output_directory(loaded.run_dir, mode, output_dir)
     metric_standard = normalize_metric_standard(loaded.config.metric_standard)
     metric_threshold = validate_metric_threshold(loaded.config.metric_threshold)
-    prediction_path = destination / "inference_predictions_by_lead_day.csv"
-    metrics_path = destination / "inference_metrics_by_lead_day.csv"
+    logs_dir = logs_directory(destination, create=True)
+    prediction_path = logs_dir / "inference_predictions_by_lead_day.csv"
+    metrics_path = logs_dir / "inference_metrics_by_lead_day.csv"
     prediction_frame = _prediction_dataframe(
         predictions,
         actual,
@@ -1446,9 +1449,9 @@ def run_inference(
             "metric_threshold_mm": metric_threshold,
             **selection,
     }
-    _write_json(destination / "inference_config.json", request_payload)
+    _write_json(logs_dir / "inference_config.json", request_payload)
     _write_json(
-        destination / "inference_contract.json",
+        logs_dir / "inference_contract.json",
         {
             "input_shape": [len(predictions), loaded.config.window_size, len(loaded.station_names), len(loaded.feature_names)],
             "output_shape": list(predictions.shape),
@@ -1461,7 +1464,7 @@ def run_inference(
         },
     )
     _write_json(
-        destination / "inference_summary.json",
+        logs_dir / "inference_summary.json",
         {
             "source_run": str(loaded.run_dir),
             "mode": mode,
@@ -1476,8 +1479,8 @@ def run_inference(
                 else None
             ),
             "preprocessing_source": loaded.preprocessing_source,
-            "predictions_csv": prediction_path.name,
-            "metrics_csv": metrics_path.name,
+            "predictions_csv": str(prediction_path.relative_to(destination)),
+            "metrics_csv": str(metrics_path.relative_to(destination)),
         },
     )
     if show_progress:

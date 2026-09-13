@@ -8,7 +8,8 @@ ERA5 data are large spatial grids. The script samples the ERA5 grid point
 nearest to ``station_id`` and creates all plots from that station. Precipitation
 is converted from metres to millimetres and summed at the selected resolution;
 ``t2m`` and ``d2m`` are converted from Kelvin to Celsius and averaged.
-Quantile thresholds are only available for daily precipitation.
+Quantile thresholds are only available for daily precipitation. Set
+``quantile_legend`` to ``False`` to omit their lines and legend from plots.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import xarray as xr
 
 
@@ -31,15 +33,16 @@ import xarray as xr
 # Selection parameters
 # ---------------------------------------------------------------------------
 dataset = "era5"
-features = ["precipitation"]
+features = ["precipitation", "t2m", "d2m"]
 plots = ["histogram", "timeseries", "scatter", "boxplot"]
 station_id = "PORTO ALEGRE JARDIM BOTANICO"  # Name used by PLOT_STATION_NAME in run_experiment.py.
 temporal_resolution = "day"  # Options: "hour", "day", "month", or "year".
-quantiles = [0.3,0.5,0.7,0.9,0.99]  # Daily precipitation quantile thresholds.
+quantiles = [0.9]  # Daily precipitation quantile thresholds.
+quantile_legend = False  # Draw daily precipitation quantile lines and their legend.
 
 
 ROOT = Path(__file__).resolve().parent
-OUTPUT_DIR = ROOT / "Dataset_Plots"
+OUTPUT_DIR = ROOT / "Dataset_Plots" / "Presentation Plots"
 SRC_DIR = ROOT / "src"
 STATION_STATE = "RS"
 CATALOG_PATH = ROOT / "Datasets" / "dados_inmet" / "Catalogo*.csv"
@@ -68,7 +71,11 @@ if str(SRC_DIR) not in sys.path:
 
 from Data.dataset_paths import open_meteorological_dataset  # noqa: E402
 from Data.temporal_dataset import load_station_catalog  # noqa: E402
+from Evaluation.plot_style import apply_seaborn_theme, style_axis  # noqa: E402
 from Training.experiment_runner import resolve_catalog_path  # noqa: E402
+
+
+apply_seaborn_theme()
 
 
 FEATURE_SPECS = {
@@ -81,20 +88,20 @@ FEATURE_SPECS = {
     "t2m": {
         "dataset_token": "temp",
         "variables": ("t2m",),
-        "label": "2 m temperature",
+        "label": "Temperature",
         "color": "#E64A19",
     },
     "d2m": {
         "dataset_token": "temp",
         "variables": ("d2m",),
-        "label": "2 m dewpoint temperature",
+        "label": "Dew point",
         "color": "#6A1B9A",
     },
 }
 SUPPORTED_PLOTS = {"histogram", "timeseries", "scatter", "boxplot"}
 
 
-def _validate_choices() -> tuple[list[str], list[str], str, list[float]]:
+def _validate_choices() -> tuple[list[str], list[str], str, list[float], bool]:
     """Validate the editable configuration at the top of the file."""
     if dataset.casefold() != "era5":
         raise ValueError("Only the 'era5' dataset is configured in this script.")
@@ -136,12 +143,15 @@ def _validate_choices() -> tuple[list[str], list[str], str, list[float]]:
             "Every value in 'quantiles' must be between 0 and 1. "
             f"Invalid values: {invalid_quantiles}."
         )
+    if not isinstance(quantile_legend, bool):
+        raise ValueError("'quantile_legend' must be True or False.")
 
     return (
         list(dict.fromkeys(selected_features)),
         list(dict.fromkeys(selected_plots)),
         selected_resolution,
         list(dict.fromkeys(selected_quantiles)),
+        quantile_legend,
     )
 
 
@@ -381,19 +391,35 @@ def plot_histograms(
     resolution: str,
     precipitation_thresholds: dict[float, float],
     station_name: str,
+    quantile_legend: bool = True,
 ) -> list[Path]:
-    """Create one temporal-distribution histogram per selected feature."""
+    """Create one temporal-distribution histogram per selected feature.
+
+    Precipitation uses a logarithmic frequency axis so infrequent high-mm/day
+    events remain visible alongside the much more common light-rain events.
+    """
     saved_paths = []
     for feature, series in temporal_series.items():
         _, values = _finite_values(series)
         spec = FEATURE_SPECS[feature]
         figure, axis = plt.subplots(figsize=(8, 5))
-        axis.hist(values, bins="auto", color=spec["color"], alpha=0.82, edgecolor="white")
-        axis.set_title(f"Histogram - {spec['label']} (ERA5)\nStation: {station_name}")
+        sns.histplot(
+            x=values,
+            bins="auto",
+            color=spec["color"],
+            alpha=0.82,
+            edgecolor="white",
+            ax=axis,
+        )
+        axis.set_title(spec["label"])
         axis.set_xlabel(_feature_unit(feature, resolution))
-        axis.set_ylabel(f"Frequency ({TEMPORAL_UNITS[resolution]})")
-        axis.grid(axis="y", alpha=0.25)
-        if feature == "precipitation" and precipitation_thresholds:
+        if feature == "precipitation":
+            axis.set_yscale("log")
+            axis.set_ylabel(f"Frequency ({TEMPORAL_UNITS[resolution]}, log scale)")
+        else:
+            axis.set_ylabel(f"Frequency ({TEMPORAL_UNITS[resolution]})")
+        style_axis(axis, grid_axis="y")
+        if quantile_legend and feature == "precipitation" and precipitation_thresholds:
             _add_precipitation_thresholds(axis, precipitation_thresholds, direction="x")
             axis.legend(title="Daily threshold")
         saved_paths.append(
@@ -410,6 +436,7 @@ def plot_timeseries(
     resolution: str,
     precipitation_thresholds: dict[float, float],
     station_name: str,
+    quantile_legend: bool = True,
 ) -> list[Path]:
     """Create a temporal-series panel with one axis per selected feature."""
     figure, axes = plt.subplots(
@@ -423,19 +450,22 @@ def plot_timeseries(
     for axis, (feature, series) in zip(axes[:, 0], temporal_series.items()):
         spec = FEATURE_SPECS[feature]
         times, values = _finite_values(series)
-        axis.plot(times, values, color=spec["color"], linewidth=0.85)
+        sns.lineplot(
+            x=times,
+            y=values,
+            color=spec["color"],
+            linewidth=1.5,
+            estimator=None,
+            ax=axis,
+        )
         axis.set_ylabel(_feature_unit(feature, resolution))
         axis.set_title(spec["label"])
-        axis.grid(alpha=0.25)
-        if feature == "precipitation" and precipitation_thresholds:
+        style_axis(axis, grid_axis="y")
+        if quantile_legend and feature == "precipitation" and precipitation_thresholds:
             _add_precipitation_thresholds(axis, precipitation_thresholds, direction="y")
             axis.legend(title="Daily threshold")
 
     axes[-1, 0].set_xlabel("Date")
-    figure.suptitle(
-        f"{TEMPORAL_LABELS[resolution]} time series - ERA5\nStation: {station_name}",
-        y=1.02,
-    )
     return [
         _save_figure(
             figure,
@@ -449,6 +479,7 @@ def plot_scatters(
     resolution: str,
     precipitation_thresholds: dict[float, float],
     station_name: str,
+    quantile_legend: bool = True,
 ) -> list[Path]:
     """Create scatter plots for every pair of selected features."""
     saved_paths = []
@@ -469,25 +500,24 @@ def plot_scatters(
         x_spec = FEATURE_SPECS[x_feature]
         y_spec = FEATURE_SPECS[y_feature]
         figure, axis = plt.subplots(figsize=(7, 5.5))
-        axis.scatter(
-            values[:, 0],
-            values[:, 1],
+        sns.scatterplot(
+            x=values[:, 0],
+            y=values[:, 1],
             s=10,
             alpha=0.35,
             color=y_spec["color"],
-            edgecolors="none",
+            edgecolor=None,
+            legend=False,
+            ax=axis,
         )
-        axis.set_title(
-            f"Scatter plot - {x_spec['label']} vs. {y_spec['label']} (ERA5)\n"
-            f"Station: {station_name}"
-        )
+        axis.set_title(f"{x_spec['label']} vs. {y_spec['label']}")
         axis.set_xlabel(f"{x_spec['label']} ({_feature_unit(x_feature, resolution)})")
         axis.set_ylabel(f"{y_spec['label']} ({_feature_unit(y_feature, resolution)})")
-        axis.grid(alpha=0.25)
-        if precipitation_thresholds and x_feature == "precipitation":
+        style_axis(axis)
+        if quantile_legend and precipitation_thresholds and x_feature == "precipitation":
             _add_precipitation_thresholds(axis, precipitation_thresholds, direction="x")
             axis.legend(title="Daily threshold")
-        elif precipitation_thresholds and y_feature == "precipitation":
+        elif quantile_legend and precipitation_thresholds and y_feature == "precipitation":
             _add_precipitation_thresholds(axis, precipitation_thresholds, direction="y")
             axis.legend(title="Daily threshold")
         saved_paths.append(
@@ -505,6 +535,7 @@ def plot_boxplots(
     resolution: str,
     precipitation_thresholds: dict[float, float],
     station_name: str,
+    quantile_legend: bool = True,
 ) -> list[Path]:
     """Create seasonal box plots for the selected features."""
     saved_paths = []
@@ -515,8 +546,15 @@ def plot_boxplots(
 
         if resolution == "year":
             _, values = _finite_values(series)
-            axis.boxplot([values], tick_labels=["All years"], showfliers=False)
-            axis.set_title(f"Yearly box plot - {spec['label']} (ERA5)\nStation: {station_name}")
+            sns.boxplot(
+                data=[values],
+                color=spec["color"],
+                showfliers=False,
+                width=0.5,
+                ax=axis,
+            )
+            axis.set_xticks([0], ["All years"])
+            axis.set_title(spec["label"])
             axis.set_xlabel("Aggregation")
         else:
             values_by_month = []
@@ -525,15 +563,20 @@ def plot_boxplots(
                     series.where(series.time.dt.month == month, drop=True).values, dtype=float
                 )
                 values_by_month.append(monthly_values[np.isfinite(monthly_values)])
-            axis.boxplot(values_by_month, tick_labels=month_labels, showfliers=False)
-            axis.set_title(
-                f"Calendar-month box plot - {spec['label']} (ERA5)\nStation: {station_name}"
+            sns.boxplot(
+                data=values_by_month,
+                color=spec["color"],
+                showfliers=False,
+                width=0.65,
+                ax=axis,
             )
+            axis.set_xticks(range(12), month_labels)
+            axis.set_title(spec["label"])
             axis.set_xlabel("Calendar month")
 
         axis.set_ylabel(_feature_unit(feature, resolution))
-        axis.grid(axis="y", alpha=0.25)
-        if feature == "precipitation" and precipitation_thresholds:
+        style_axis(axis, grid_axis="y")
+        if quantile_legend and feature == "precipitation" and precipitation_thresholds:
             _add_precipitation_thresholds(axis, precipitation_thresholds, direction="y")
             axis.legend(title="Daily threshold")
         saved_paths.append(
@@ -547,7 +590,13 @@ def plot_boxplots(
 
 def main() -> list[Path]:
     """Generate the selected plots and return their output paths."""
-    selected_features, selected_plots, selected_resolution, selected_quantiles = _validate_choices()
+    (
+        selected_features,
+        selected_plots,
+        selected_resolution,
+        selected_quantiles,
+        show_quantile_legend,
+    ) = _validate_choices()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     station_name, station_latitude, station_longitude = _resolve_station()
     temporal_series = _load_temporal_series(
@@ -568,6 +617,7 @@ def main() -> list[Path]:
                 selected_resolution,
                 precipitation_thresholds,
                 station_name,
+                show_quantile_legend,
             )
         )
     if "timeseries" in selected_plots:
@@ -577,6 +627,7 @@ def main() -> list[Path]:
                 selected_resolution,
                 precipitation_thresholds,
                 station_name,
+                show_quantile_legend,
             )
         )
     if "scatter" in selected_plots:
@@ -589,6 +640,7 @@ def main() -> list[Path]:
                     selected_resolution,
                     precipitation_thresholds,
                     station_name,
+                    show_quantile_legend,
                 )
             )
     if "boxplot" in selected_plots:
@@ -598,14 +650,20 @@ def main() -> list[Path]:
                 selected_resolution,
                 precipitation_thresholds,
                 station_name,
+                show_quantile_legend,
             )
         )
 
-    if precipitation_thresholds:
+    if show_quantile_legend and precipitation_thresholds:
         print("Daily precipitation quantile thresholds:")
         for quantile, threshold in precipitation_thresholds.items():
             print(f"- Q{quantile * 100:g}: {threshold:.2f} mm/day")
-    elif selected_quantiles and "precipitation" in temporal_series and selected_resolution != "day":
+    elif (
+        show_quantile_legend
+        and selected_quantiles
+        and "precipitation" in temporal_series
+        and selected_resolution != "day"
+    ):
         print("Quantile thresholds were skipped because they are only defined for daily precipitation.")
 
     print(

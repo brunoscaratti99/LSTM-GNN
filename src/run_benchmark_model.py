@@ -29,6 +29,7 @@ from Data.temporal_dataset import (
 )
 from Evaluation.experiment_outputs import save_dataset_contract, save_prediction_outputs
 from Training.experiment_runner import print_status, resolve_catalog_path, select_stations
+from output_layout import logs_directory
 
 
 # Data selection: keep these values equal to run_experiment.py for a direct comparison.
@@ -51,7 +52,7 @@ VAL_RATIO = 0.2
 
 # One or more of: auto_arima, persistence_station, seasonal_persistence,
 # station_mean, station_median, zero.
-BENCHMARK_MODELS = ["auto_arima", "persistence_station"]
+BENCHMARK_MODELS = ["auto_arima"]
 SEASONAL_PERSISTENCE_LAG_DAYS = 365
 CLIP_NEGATIVE_PREDICTIONS = True
 
@@ -494,7 +495,8 @@ def run_benchmark_models(
 
     parent_config = asdict(config)
     parent_config["benchmark_models"] = list(selected_models)
-    _write_json(run_dir / "config.json", parent_config)
+    logs_dir = logs_directory(run_dir, create=True)
+    _write_json(logs_dir / "config.json", parent_config)
     save_dataset_contract(run_dir, raw_X, raw_y, windowed, windowed, config)
 
     summaries: list[dict[str, Any]] = []
@@ -502,6 +504,7 @@ def run_benchmark_models(
         print_status(f"Running benchmark: {model_name}", config.show_console_info)
         model_dir = run_dir / model_name
         model_dir.mkdir()
+        model_logs_dir = logs_directory(model_dir, create=True)
         predictions, model_details = _predict_model(
             model_name, raw_y, splits, windowed, config
         )
@@ -511,10 +514,10 @@ def run_benchmark_models(
         metrics = regression_metrics(actual, predictions)
         model_config = dict(parent_config)
         model_config["benchmark_model"] = model_name
-        _write_json(model_dir / "config.json", model_config)
-        _write_json(model_dir / "test_metrics.json", metrics)
+        _write_json(model_logs_dir / "config.json", model_config)
+        _write_json(model_logs_dir / "test_metrics.json", metrics)
         if model_details:
-            _write_json(model_dir / "model_details.json", model_details)
+            _write_json(model_logs_dir / "model_details.json", model_details)
         save_prediction_outputs(
             model_dir,
             actual,
@@ -526,8 +529,8 @@ def run_benchmark_models(
         summaries.append({"model": model_name, **metrics, "output": str(model_dir)})
 
     summary_frame = pd.DataFrame(summaries)
-    summary_frame.to_csv(run_dir / "benchmark_summary.csv", index=False)
-    _write_json(run_dir / "benchmark_summary.json", summaries)
+    summary_frame.to_csv(logs_dir / "benchmark_summary.csv", index=False)
+    _write_json(logs_dir / "benchmark_summary.json", summaries)
     print_status(f"Benchmark complete: {run_dir}", config.show_console_info)
     return run_dir
 

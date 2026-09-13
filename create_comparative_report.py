@@ -25,7 +25,7 @@ MANIFEST_FILENAME = "comparative_summary.json"
 DEFAULT_SEARCH_ROOT = (
     ROOT
     / "Experiments"
-    / "run_experiment"
+    / "run_experiment" / "09_09_2026"
 )
 
 

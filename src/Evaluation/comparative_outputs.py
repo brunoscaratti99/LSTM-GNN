@@ -30,10 +30,12 @@ from Evaluation.metrics import (
 from Evaluation.plot_style import (
     REFERENCE_COLOR,
     apply_seaborn_theme,
+    lead_day_legend_labels,
     save_figure,
     style_axis,
     style_time_axis,
 )
+from output_layout import logs_directory, resolve_run_artifact
 
 
 REPORT_FILENAME = "report_compare.tex"
@@ -111,7 +113,7 @@ def _incomplete_run_reasons(sweep_dir: Path, record: Mapping[str, object]) -> li
         reasons.append(f"run directory not found: {run_dir.name}")
         return reasons
 
-    if not (run_dir / RUN_INDICATOR_FILE).is_file():
+    if not resolve_run_artifact(run_dir, RUN_INDICATOR_FILE).is_file():
         reasons.append(f"missing {RUN_INDICATOR_FILE}")
     return reasons
 
@@ -175,7 +177,7 @@ def _record_metric_policy(
     parameters = record.get("parameters")
     values = dict(parameters) if isinstance(parameters, Mapping) else {}
     if ("metric_standard" not in values or "metric_threshold" not in values) and run_dir is not None:
-        config_path = run_dir / "config.json"
+        config_path = resolve_run_artifact(run_dir, "config.json")
         if config_path.is_file():
             try:
                 config_values = json.loads(config_path.read_text(encoding="utf-8"))
@@ -194,7 +196,7 @@ def _row_identity(row: Mapping[str, object]) -> tuple[object, object, object]:
 
 
 def _history_from_run(run_dir: Path, warnings: list[str]) -> dict | None:
-    history_path = run_dir / "hist.pt"
+    history_path = resolve_run_artifact(run_dir, "hist.pt")
     if not history_path.exists():
         warnings.append(f"History not found: {history_path.name} ({run_dir.name}).")
         return None
@@ -341,7 +343,7 @@ def _load_station_predictions(
         run_dir = _run_directory(sweep_dir, record)
         if run_dir is None:
             continue
-        csv_path = run_dir / "test_predictions_by_lead_day.csv"
+        csv_path = resolve_run_artifact(run_dir, "test_predictions_by_lead_day.csv")
         if not csv_path.exists():
             warnings.append(f"Prediction CSV not found for {_record_label(record)}.")
             continue
@@ -477,6 +479,7 @@ def _save_prediction_timeseries(
     paths = []
     for lead in aligned_predictions:
         models = lead["models"]
+        era5_label, glstm_label = lead_day_legend_labels(lead["lead_day"])
         fig, axis = plt.subplots(figsize=(14.0, 5.4))
         actual = np.asarray(models[0]["actual_mm"], dtype=float)
         sns.lineplot(
@@ -485,7 +488,7 @@ def _save_prediction_timeseries(
             ax=axis,
             color=REFERENCE_COLOR,
             linewidth=2.5,
-            label="Actual",
+            label=era5_label,
             estimator=None,
             errorbar=None,
         )
@@ -499,7 +502,7 @@ def _save_prediction_timeseries(
                 color=colors[label],
                 linewidth=1.75,
                 alpha=0.92,
-                label=label,
+                label=(glstm_label if len(models) == 1 else f"{label} Lead Day {lead['lead_day']}"),
                 estimator=None,
                 errorbar=None,
             )
@@ -1014,6 +1017,7 @@ def save_comparative_outputs(sweep_dir: Path | str, manifest: Mapping[str, objec
     sweep_dir = Path(sweep_dir)
     output_dir = sweep_dir / ANALYSIS_DIRECTORY
     output_dir.mkdir(parents=True, exist_ok=True)
+    analysis_logs_dir = logs_directory(output_dir, create=True)
     apply_seaborn_theme()
 
     warnings: list[str] = []
@@ -1032,7 +1036,7 @@ def save_comparative_outputs(sweep_dir: Path | str, manifest: Mapping[str, objec
     }
     timeseries_paths = _save_prediction_timeseries(aligned_predictions, output_dir, colors)
     scatter_paths, metric_rows = _save_scatter_comparisons(aligned_predictions, output_dir, colors)
-    pd.DataFrame(metric_rows).to_csv(output_dir / STATION_METRICS_CSV, index=False)
+    pd.DataFrame(metric_rows).to_csv(analysis_logs_dir / STATION_METRICS_CSV, index=False)
 
     pivot_parameter = str(manifest.get("comparative_parameter", "comparative_parameter"))
     parameter_metrics_path = _save_parameter_metrics_plot(metric_rows, completed, pivot_parameter, output_dir)

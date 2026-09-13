@@ -84,3 +84,11 @@ def save_figure(fig, output_path, *, dpi: int = 190, tight: bool = True) -> Path
 
 def prediction_palette() -> dict[str, str]:
     return dict(PLOT_COLORS)
+
+
+def lead_day_legend_labels(lead_day: int) -> tuple[str, str]:
+    """Return the standard ERA5 and GLSTM legend labels for one lead day."""
+    day = int(lead_day)
+    if day < 1:
+        raise ValueError("lead_day must be positive.")
+    return f"ERA5 Lead day {day}", f"GLSTM Lead Day {day}"

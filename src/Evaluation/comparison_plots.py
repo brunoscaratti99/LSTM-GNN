@@ -14,10 +14,12 @@ import xarray as xr
 from Evaluation.plot_style import (
     REFERENCE_COLOR,
     apply_seaborn_theme,
+    lead_day_legend_labels,
     prediction_palette,
     save_figure,
     style_axis,
 )
+from output_layout import LOGS_DIRECTORY, resolve_run_artifact
 
 
 apply_seaborn_theme()
@@ -335,7 +337,7 @@ def plot_por_hiperparametro_train_val(
 
 def infer_run_metadata(hist_path):
     hist_path = Path(hist_path)
-    run_dir = hist_path.parent
+    run_dir = hist_path.parent.parent if hist_path.parent.name == LOGS_DIRECTORY else hist_path.parent
     cfg_dir = run_dir.parent
     cfg_name = cfg_dir.name
 
@@ -371,7 +373,7 @@ def infer_run_metadata(hist_path):
     if m:
         meta["dropout_tag"] = m.group(1)
 
-    summary_path = run_dir / "run_summary.json"
+    summary_path = resolve_run_artifact(run_dir, "run_summary.json")
     if summary_path.exists():
         with open(summary_path, "r", encoding="utf-8") as f:
             summary = json.load(f)
@@ -513,7 +515,7 @@ def analisar_experimentos(
     def _collect_runs():
         rows = []
         for summary_path in root.rglob("run_summary.json"):
-            run_dir = summary_path.parent
+            run_dir = summary_path.parent.parent if summary_path.parent.name == LOGS_DIRECTORY else summary_path.parent
             rel = run_dir.relative_to(root)
             parts = list(rel.parts)
 
@@ -560,7 +562,7 @@ def analisar_experimentos(
             }
 
             if load_hist:
-                hist_path = run_dir / "hist.pt"
+                hist_path = resolve_run_artifact(run_dir, "hist.pt")
                 if hist_path.exists():
                     hist = torch.load(hist_path, map_location="cpu")
                     row["history"] = hist
@@ -756,7 +758,14 @@ def model_weights_hist(model):
 
 #funções de plots necessárias
 
-def plot_estacao_unica(y_real, y_pred, station_idx, start_date_plot, station_name=None):
+def plot_estacao_unica(
+    y_real,
+    y_pred,
+    station_idx,
+    start_date_plot,
+    station_name=None,
+    lead_day=1,
+):
     """
     y_real, y_pred: tensores [T, N] (escala física, ex: mm/dia)
     station_idx: índice do nó/estação
@@ -767,9 +776,10 @@ def plot_estacao_unica(y_real, y_pred, station_idx, start_date_plot, station_nam
     datas = pd.date_range(start=start_date_plot, periods=len(y_real_np), freq="D")
 
     palette = prediction_palette()
+    era5_label, glstm_label = lead_day_legend_labels(lead_day)
     fig, ax = plt.subplots(figsize=(12, 4))
-    sns.lineplot(x=datas, y=y_real_np, ax=ax, label="ERA5 real", linewidth=2.2, color=palette["actual"], estimator=None)
-    sns.lineplot(x=datas, y=y_pred_np, ax=ax, label="Rede estimado", linewidth=2.2, color=palette["predicted"], estimator=None)
+    sns.lineplot(x=datas, y=y_real_np, ax=ax, label=era5_label, linewidth=2.2, color=palette["actual"], estimator=None)
+    sns.lineplot(x=datas, y=y_pred_np, ax=ax, label=glstm_label, linewidth=2.2, color=palette["predicted"], estimator=None)
     ax.set_title(f"Real vs Previsto - nó {station_idx}" if station_name is None else f"Real vs Previsto - {station_name}")
     ax.set_xlabel("Data")
     ax.set_ylabel("Precipitação")
@@ -829,6 +839,7 @@ def plot_precip_pred_vs_true(
     ax=None,
     show=True,
     title=None,
+    lead_day=None,
 ):
     """
     Plota precipitacao predita vs real sem repetir dias.
@@ -879,8 +890,12 @@ def plot_precip_pred_vs_true(
         fig = ax.figure
 
     palette = prediction_palette()
-    sns.lineplot(x=x, y=true_series, ax=ax, label="real", linewidth=2.2, color=palette["actual"], estimator=None)
-    sns.lineplot(x=x, y=pred_series, ax=ax, label="predito", linewidth=2.2, color=palette["predicted"], estimator=None)
+    if lead_day is None:
+        era5_label, glstm_label = "ERA5 All lead days", "GLSTM All Lead Days"
+    else:
+        era5_label, glstm_label = lead_day_legend_labels(lead_day)
+    sns.lineplot(x=x, y=true_series, ax=ax, label=era5_label, linewidth=2.2, color=palette["actual"], estimator=None)
+    sns.lineplot(x=x, y=pred_series, ax=ax, label=glstm_label, linewidth=2.2, color=palette["predicted"], estimator=None)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("Precipitacao")
     ax.set_title(title or f"Precipitacao real vs predita - {label}")

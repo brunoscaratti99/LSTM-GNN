@@ -99,14 +99,11 @@ Edit the constants at the top of `src/run_experiment.py` to choose:
 The runner writes outputs under `Experiments/run_experiment/<run_name>/`, including:
 
 - `parameters.md`, with all source-selectable settings and their effective values;
-- `config.json`;
-- `dataset_contract.json`;
-- `run_summary.json`;
-- `test_metrics.json`;
-- `test_metrics_physical_scale.json`;
-- `hist.pt` and model checkpoint files;
-- prediction CSVs by lead day;
-- learned cross-node standard-deviation predictions by lead day when `LEARN_STD=True`;
+- `logs/`, containing JSON, CSV, and PyTorch artifacts: configuration,
+  dataset/inference contracts, metrics, prediction tables, `hist.pt`, and the
+  model checkpoint;
+- `train_history/`, containing `mse_curve.png`, `mae_curve.png`, and
+  `r2_curve.png`;
 - prediction overview plots;
 - per-lead-day diagnostics;
 - initial graph and learned topology images.

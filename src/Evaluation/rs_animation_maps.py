@@ -20,6 +20,8 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 import numpy as np
 import pandas as pd
 
+from output_layout import resolve_run_artifact
+
 
 RS_IBGE_GEOJSON_URL = (
     "https://servicodados.ibge.gov.br/api/v3/malhas/estados/43"
@@ -143,8 +145,8 @@ def _resolve_predictions_csv(run_dir: Path, predictions_csv: Path | str | None) 
             raise FileNotFoundError(f"Prediction CSV not found: {path}")
         return path
     candidates = (
-        run_dir / "test_predictions_by_lead_day.csv",
-        run_dir / "inference_predictions_by_lead_day.csv",
+        resolve_run_artifact(run_dir, "test_predictions_by_lead_day.csv"),
+        resolve_run_artifact(run_dir, "inference_predictions_by_lead_day.csv"),
     )
     for path in candidates:
         if path.is_file():
@@ -242,7 +244,7 @@ def _read_prediction_period(
 
 def _source_run_candidates(run_dir: Path) -> list[Path]:
     candidates = [run_dir]
-    config_path = run_dir / "inference_config.json"
+    config_path = resolve_run_artifact(run_dir, "inference_config.json")
     if config_path.is_file():
         with open(config_path, "r", encoding="utf-8") as file:
             config = json.load(file)
@@ -257,7 +259,7 @@ def _source_run_candidates(run_dir: Path) -> list[Path]:
 def _load_station_coordinates(run_dir: Path) -> dict[str, tuple[float, float]]:
     searched = []
     for candidate in _source_run_candidates(run_dir):
-        state_path = candidate / "inference_state.json"
+        state_path = resolve_run_artifact(candidate, "inference_state.json")
         searched.append(str(state_path))
         if not state_path.is_file():
             continue

@@ -180,8 +180,10 @@ class ModifiedMetricPipelineTests(unittest.TestCase):
 
             self.assertEqual(predictions_frame["metric_eligible"].tolist(), [False, True])
             physical_metrics = json.loads(
-                (temp_dir / "test_metrics_physical_scale.json").read_text(encoding="utf-8")
+                (temp_dir / "logs" / "test_metrics_physical_scale.json").read_text(encoding="utf-8")
             )
+            self.assertTrue((temp_dir / "logs" / "test_predictions_by_lead_day.csv").is_file())
+            self.assertFalse((temp_dir / "test_predictions_by_lead_day.csv").exists())
             self.assertEqual(physical_metrics["n_metric_targets"], 1)
             self.assertEqual(physical_metrics["RMSE"], 2.0)
             self.assertEqual(physical_metrics["MAE"], 2.0)

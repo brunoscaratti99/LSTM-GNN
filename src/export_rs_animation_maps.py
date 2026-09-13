@@ -13,15 +13,15 @@ if str(ROOT / "src") not in sys.path:
 
 from Evaluation.rs_animation_maps import save_rs_precipitation_animation_frames  # noqa: E402
 
-ORIGIN_PATH = "Experiments/run_experiment/07_09_2026/comparative_hidden_dim_20260907_142737/run_003__k_neighbors=10__hidden_dim=64"
+ORIGIN_PATH = "Experiments/run_experiment/10_09_2026/glstm_sweep_20260910_170203"
 
 # Editable defaults. Command-line arguments override them.
 RUN_DIR: Path | None = Path(
    ORIGIN_PATH
 )
 SAMPLE: int | None = None  # Legacy mode; use -1 for the last test sample.
-START_DATE: str | None = "2024-04-20"
-END_DATE: str | None = "2024-05-20"
+START_DATE: str | None = "2021-09-01"
+END_DATE: str | None = "2021-10-15"
 LEAD_DAY: int | None = 1
 OUTPUT_DIR: Path | None = Path(
     ORIGIN_PATH + "/animation_beamer"

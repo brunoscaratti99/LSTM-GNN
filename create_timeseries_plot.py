@@ -23,6 +23,7 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from Evaluation.experiment_outputs import _normalize_station_name  # noqa: E402
+from output_layout import resolve_run_artifact  # noqa: E402
 from plot_timeperiod import (  # noqa: E402
     _parse_date,
     _prediction_columns,
@@ -31,14 +32,14 @@ from plot_timeperiod import (  # noqa: E402
 
 
 # Configuration: edit these values directly in this file.
-START_DATE = "2021-09-01"
-END_DATE = "2021-11-01"
+START_DATE = "2021-06-01"
+END_DATE = "2022-01-01"
 
 #START_DATE = "2024-03-01"
 #END_DATE = "2024-06-01"
 
 RUN_PATH = Path(
-    r"C:\Local Repository\LSTM-GNN\Experiments\run_experiment\07_09_2026\glstm_sweep_20260909_124805"
+    r"C:\Local Repository\LSTM-GNN\Experiments\run_experiment\09_09_2026\comparative_k_neighbors_20260910_102011\run_004__k_neighbors=5"
 )
 LEAD_DAYS = [1, 5]
 
@@ -82,7 +83,7 @@ def _normalize_lead_days(lead_days: Sequence[int]) -> tuple[int, ...]:
 
 def _prediction_path(run_path: Path) -> Path:
     for filename in PREDICTION_FILENAMES:
-        candidate = run_path / filename
+        candidate = resolve_run_artifact(run_path, filename)
         if candidate.is_file():
             return candidate
     expected = " or ".join(str(run_path / name) for name in PREDICTION_FILENAMES)

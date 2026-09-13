@@ -119,20 +119,23 @@ The maintained `train_stable(...)` flow is:
 9. Update the epoch progress bar with `train_loss`, `val_loss`, `train_mse`, `val_mse`, `train_r2`, and `val_r2`.
 10. Step the learning-rate scheduler on the effective validation monitor; minimize error metrics and maximize R2 metrics automatically. Modified mode guarantees that this is one of the threshold-filtered metrics.
 11. Record validation metrics throughout the run, but only after the configured warm-up and with a finite effective metric update the scheduler/checkpoint baseline and early-stopping patience; stop when that patience is exceeded.
-12. Write history curves, checkpoint files, and `run_summary.json`.
+12. Write history curves to `train_history/` and machine-readable artifacts to
+   `logs/`.
 
 ## Inputs and Outputs
 
 - Inputs: model, train/validation loaders, window size, horizon, hidden size, training hyperparameters, criterion, run directory, and debug/loss metadata.
 - Outputs: trained model, metric-history dictionary, and run-summary dictionary.
-- Files: model state dict, `hist.pt`, `run_summary.json`, and curve plots when `run_dir` is provided.
+- Files: `logs/model_state_dict.pt`, `logs/hist.pt`,
+  `logs/run_summary.json`, and `train_history/{mse,mae,r2}_curve.png` when
+  `run_dir` is provided.
 
 ## Reloading trained runs with `inference.py`
 
 `src/inference.py` reconstructs a trained GLSTM or graph Transformer from the
-run directory. `load_trained_experiment(...)` reads `config.json`,
-`dataset_contract.json`, `model_state_dict.pt`, and, for new runs,
-`inference_state.json`. The model is built on CPU, its checkpoint is checked for
+run directory. `load_trained_experiment(...)` reads the artifacts from
+`logs/` (`config.json`, `dataset_contract.json`, `model_state_dict.pt`, and,
+for new runs, `inference_state.json`). The model is built on CPU, its checkpoint is checked for
 compatible keys/shapes, and only then moved to the requested device.
 
 - `backtest` mode predicts a requested historical interval. `start_date` and
@@ -170,7 +173,7 @@ python src/inference.py --run-dir <run-directory> --mode forecast `
 ```
 
 Every invocation creates a unique folder below `<run>/inference/` unless
-`--output-dir` is provided. It contains `inference_config.json`,
-`inference_contract.json`, `inference_summary.json`,
+`--output-dir` is provided. Its `logs/` subdirectory contains
+`inference_config.json`, `inference_contract.json`, `inference_summary.json`,
 `inference_predictions_by_lead_day.csv`, and
 `inference_metrics_by_lead_day.csv`.

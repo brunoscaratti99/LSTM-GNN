@@ -28,6 +28,7 @@ from Evaluation.metrics import (
 from Evaluation.comparison_plots import save_error_plots
 from Data.preprocessing import assert_finite
 from Training.experiment_runner import unpack_model_output
+from output_layout import logs_directory, train_history_directory
 
 loss_fn = nn.MSELoss()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -791,7 +792,7 @@ def train_stable(
         run_dir.mkdir(parents=True, exist_ok=True)
 
         save_error_plots(
-            str(run_dir),
+            str(train_history_directory(run_dir, create=True)),
             history["train_mse"], history["val_mse"],
             history["train_mae"], history["val_mae"],
             history["train_r2"],  history["val_r2"],
@@ -799,9 +800,10 @@ def train_stable(
             metric_threshold_mm=metric_threshold_mm,
         )
 
-        torch.save(history, run_dir / "hist.pt")
-        torch.save(model.state_dict(), run_dir / "model_state_dict.pt")
-        with open(run_dir / "run_summary.json", "w", encoding="utf-8") as f:
+        logs_dir = logs_directory(run_dir, create=True)
+        torch.save(history, logs_dir / "hist.pt")
+        torch.save(model.state_dict(), logs_dir / "model_state_dict.pt")
+        with open(logs_dir / "run_summary.json", "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
 
     return model, history, summary
@@ -985,15 +987,16 @@ def train_batched_only(model, train_loader, val_loader, train_period, hidden_dim
         run_dir.mkdir(parents=True, exist_ok=True)
 
         save_error_plots(
-            str(run_dir),
+            str(train_history_directory(run_dir, create=True)),
             history["train_mse"], history["val_mse"],
             history["train_mae"], history["val_mae"],
             history["train_r2"],  history["val_r2"],
         )
 
-        torch.save(history, run_dir / "hist.pt")
-        torch.save(model.state_dict(), run_dir / "model_state_dict.pt")
-        with open(run_dir / "run_summary.json", "w", encoding="utf-8") as f:
+        logs_dir = logs_directory(run_dir, create=True)
+        torch.save(history, logs_dir / "hist.pt")
+        torch.save(model.state_dict(), logs_dir / "model_state_dict.pt")
+        with open(logs_dir / "run_summary.json", "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
 
     return model, history, summary

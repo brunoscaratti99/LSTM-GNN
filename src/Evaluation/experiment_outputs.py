@@ -23,6 +23,7 @@ import seaborn as sns
 import torch
 
 from Data.temporal_dataset import target_standard_deviation_to_physical_scale
+from output_layout import logs_directory
 from Evaluation.metrics import (
     METRIC_STANDARD_MODIFIED,
     normalize_metric_standard,
@@ -32,6 +33,7 @@ from Evaluation.metrics import (
 from Evaluation.plot_style import (
     REFERENCE_COLOR,
     apply_seaborn_theme,
+    lead_day_legend_labels,
     prediction_palette,
     save_figure,
     style_axis,
@@ -167,8 +169,6 @@ def _undirected_edges(edge_index, n_nodes: int) -> list[tuple[int, int]]:
 def _prepare_rs_graph_axis(
     positions: Mapping[int, tuple[float, float]],
     polygons: list[list[np.ndarray]],
-    *,
-    title: str,
 ):
     figure, axis = plt.subplots(figsize=(10.5, 9.5), facecolor="white")
     lon_min, lon_max, lat_min, lat_max = _draw_state_boundary(axis, polygons)
@@ -178,7 +178,6 @@ def _prepare_rs_graph_axis(
     axis.set_ylim(lat_min - lat_padding, lat_max + lat_padding)
     axis.set_aspect("equal", adjustable="box")
     axis.set_axis_off()
-    axis.set_title(title, fontsize=16, pad=12)
 
     graph = nx.Graph()
     graph.add_nodes_from(positions)
@@ -186,6 +185,7 @@ def _prepare_rs_graph_axis(
 
 
 def _draw_station_nodes(axis, graph: nx.Graph, positions: Mapping[int, tuple[float, float]]) -> None:
+    """Draw unlabeled station markers for the geographic RS graph figures."""
     nx.draw_networkx_nodes(
         graph,
         positions,
@@ -193,14 +193,6 @@ def _draw_station_nodes(axis, graph: nx.Graph, positions: Mapping[int, tuple[flo
         edgecolors="#17324d",
         linewidths=0.8,
         node_size=210,
-        ax=axis,
-    )
-    nx.draw_networkx_labels(
-        graph,
-        positions,
-        font_color="#17212b",
-        font_size=7,
-        font_weight="bold",
         ax=axis,
     )
 
@@ -217,11 +209,7 @@ def save_graph_plot(
     positions = _validated_positions(pos)
     edges = _undirected_edges(edge_index, len(positions))
     polygons = _rs_boundary_polygons(boundary_geojson)
-    figure, axis, graph = _prepare_rs_graph_axis(
-        positions,
-        polygons,
-        title="Initial station graph topology",
-    )
+    figure, axis, graph = _prepare_rs_graph_axis(positions, polygons)
     graph.add_edges_from(edges)
     nx.draw_networkx_edges(
         graph,
@@ -245,10 +233,14 @@ def save_weighted_graph_plot(
     pos: Mapping[int, object],
     filename: str = "weighted_graph.png",
     *,
-    title: str = "Final learned station graph ($W_{adj}$)",
     boundary_geojson: Mapping[str, object] | None = None,
 ) -> Path | None:
-    """Save non-self raw adjacency weights as a graph over the RS boundary."""
+    """Save an unlabeled weighted graph over the RS boundary.
+
+    Edge color and width encode raw non-self adjacency magnitude. The colorbar
+    deliberately retains numeric ticks while omitting a descriptive label so
+    the figure can be used directly in a presentation.
+    """
     adjacency = _model_adjacency_matrix(model, normalized=False)
     if adjacency is None:
         return None
@@ -280,11 +272,7 @@ def save_weighted_graph_plot(
     )
 
     polygons = _rs_boundary_polygons(boundary_geojson)
-    figure, axis, graph = _prepare_rs_graph_axis(
-        positions,
-        polygons,
-        title=title,
-    )
+    figure, axis, graph = _prepare_rs_graph_axis(positions, polygons)
     graph.add_edges_from(edges)
 
     if edge_magnitudes.size:
@@ -312,7 +300,6 @@ def save_weighted_graph_plot(
             fraction=0.038,
             pad=0.015,
         )
-        colorbar.set_label(r"Edge magnitude $|W_{adj}[i,j]|$")
         colorbar.outline.set_linewidth(0.6)
     else:
         axis.text(
@@ -833,6 +820,8 @@ def save_oversmoothing_diagnostics(
     run_dir = Path(run_dir)
     output_dir = run_dir / OVERSMOOTHING_DIRECTORY
     output_dir.mkdir(exist_ok=True)
+    logs_dir = logs_directory(run_dir, create=True) / OVERSMOOTHING_DIRECTORY
+    logs_dir.mkdir(exist_ok=True)
     diagnostics = _oversmoothing_dataframe(actual, predicted, target_times)
     adjacency, graph_source = _resolve_diagnostic_adjacency(model, edge_index, actual.shape[2])
     if adjacency is None:
@@ -843,8 +832,11 @@ def save_oversmoothing_diagnostics(
         diagnostics["actual_graph_dirichlet_energy_mm2"] = _graph_dirichlet_energy(actual, adjacency).reshape(-1)
         diagnostics["predicted_graph_dirichlet_energy_mm2"] = _graph_dirichlet_energy(predicted, adjacency).reshape(-1)
 
-    diagnostics.to_csv(output_dir / "node_dispersion_by_time.csv", index=False)
-    _oversmoothing_summary(diagnostics).to_csv(output_dir / "oversmoothing_summary_by_lead_day.csv", index=False)
+    diagnostics.to_csv(logs_dir / "node_dispersion_by_time.csv", index=False)
+    _oversmoothing_summary(diagnostics).to_csv(
+        logs_dir / "oversmoothing_summary_by_lead_day.csv",
+        index=False,
+    )
     outputs = {
         "node_standard_deviation": _save_node_standard_deviation_by_time(output_dir, diagnostics, actual.shape[1]),
         "node_mean": _save_node_mean_by_time(output_dir, diagnostics, actual.shape[1]),
@@ -1000,7 +992,7 @@ def save_dataset_contract(run_dir: Path, raw_X, raw_y, windowed, scaled_windowed
         },
         "torch_boundary": "Only after dated xarray split/window/scaling, via to_torch_window_splits().",
     }
-    with open(Path(run_dir) / "dataset_contract.json", "w", encoding="utf-8") as f:
+    with open(logs_directory(run_dir, create=True) / "dataset_contract.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
 
@@ -1130,7 +1122,7 @@ def save_inference_state(
         "feature_scaler": _serialize_scaler_state(scaling_state.feature_scaler),
         "target_scaler": _serialize_scaler_state(scaling_state.target_scaler),
     }
-    output_path = Path(run_dir) / "inference_state.json"
+    output_path = logs_directory(run_dir, create=True) / "inference_state.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     return output_path
@@ -1150,6 +1142,7 @@ def _save_prediction_overview(
     actual_station = _station_series(actual, plot_station_idx)
     predicted_station = _station_series(predicted, plot_station_idx)
     final_lead = actual.shape[1] - 1
+    era5_label, glstm_label = lead_day_legend_labels(final_lead + 1)
     dates = pd.to_datetime(target_times[:, final_lead])
     low, high = _axis_limits(actual, predicted)
     palette = prediction_palette()
@@ -1159,7 +1152,7 @@ def _save_prediction_overview(
         x=dates,
         y=actual_station[:, final_lead],
         ax=axes[0],
-        label="Actual",
+        label=era5_label,
         color=palette["actual"],
         linewidth=2.2,
         estimator=None,
@@ -1168,7 +1161,7 @@ def _save_prediction_overview(
         x=dates,
         y=predicted_station[:, final_lead],
         ax=axes[0],
-        label="Predicted",
+        label=glstm_label,
         color=palette["predicted"],
         linewidth=2.2,
         estimator=None,
@@ -1233,6 +1226,7 @@ def _save_prediction_timeseries_splits(
 
     for lead_idx in range(actual.shape[1]):
         lead_day = lead_idx + 1
+        era5_label, glstm_label = lead_day_legend_labels(lead_day)
         lead_dir = plot_dir / f"lead_day_{lead_day:02d}"
         lead_dir.mkdir(exist_ok=True)
 
@@ -1244,7 +1238,7 @@ def _save_prediction_timeseries_splits(
                     x=dates,
                     y=actual_station[split_indices, lead_idx],
                     ax=ax,
-                    label=f"Actual Lead Day {lead_day}",
+                    label=era5_label,
                     color=palette["actual"],
                     linewidth=2.0,
                     estimator=None,
@@ -1253,7 +1247,7 @@ def _save_prediction_timeseries_splits(
                     x=dates,
                     y=predicted_station[split_indices, lead_idx],
                     ax=ax,
-                    label=f"Predicted Lead Day {lead_day}",
+                    label=glstm_label,
                     color=palette["predicted"],
                     linewidth=2.0,
                     estimator=None,
@@ -1371,7 +1365,9 @@ def _save_forecast_lead_day_diagnostics(
 ) -> pd.DataFrame:
     diag_dir = run_dir / "forecast_horizon_diagnostics"
     diag_dir.mkdir(exist_ok=True)
-    lead_df.to_csv(diag_dir / "test_prediction_by_lead_day.csv", index=False)
+    diag_logs_dir = logs_directory(run_dir, create=True) / "forecast_horizon_diagnostics"
+    diag_logs_dir.mkdir(exist_ok=True)
+    lead_df.to_csv(diag_logs_dir / "test_prediction_by_lead_day.csv", index=False)
     palette = prediction_palette()
     metric_scope = (
         f"targets > {metric_threshold:g} mm"
@@ -1401,7 +1397,7 @@ def _save_forecast_lead_day_diagnostics(
             }
         )
     metrics_df = pd.DataFrame(metric_rows)
-    metrics_df.to_csv(diag_dir / "test_prediction_metrics_by_lead_day.csv", index=False)
+    metrics_df.to_csv(diag_logs_dir / "test_prediction_metrics_by_lead_day.csv", index=False)
 
     _save_absolute_error_boxplots(
         diag_dir,
@@ -1531,12 +1527,13 @@ def _save_forecast_lead_day_diagnostics(
             ax.set_visible(False)
         for ax, lead_idx in zip(axes.ravel(), range(n_leads)):
             lead_day = lead_idx + 1
+            era5_label, glstm_label = lead_day_legend_labels(lead_day)
             dates = pd.to_datetime(target_times[:, lead_idx])
             sns.lineplot(
                 x=dates,
                 y=actual_station[:, lead_idx],
                 ax=ax,
-                label=f"Actual Lead Day {lead_day}",
+                label=era5_label,
                 color=palette["actual"],
                 linewidth=1.9,
                 estimator=None,
@@ -1545,7 +1542,7 @@ def _save_forecast_lead_day_diagnostics(
                 x=dates,
                 y=predicted_station[:, lead_idx],
                 ax=ax,
-                label=f"Prediction Lead Day {lead_day}",
+                label=glstm_label,
                 color=palette["predicted"],
                 linewidth=1.9,
                 alpha=0.92,
@@ -1607,10 +1604,11 @@ def save_prediction_outputs(
         if metric_standard == METRIC_STANDARD_MODIFIED
         else True
     )
-    predictions_df.to_csv(run_dir / "test_predictions_by_lead_day.csv", index=False)
+    logs_dir = logs_directory(run_dir, create=True)
+    predictions_df.to_csv(logs_dir / "test_predictions_by_lead_day.csv", index=False)
     if node_std_predictions_df is not None:
         node_std_predictions_df.to_csv(
-            run_dir / "test_node_standard_deviation_predictions_by_lead_day.csv",
+            logs_dir / "test_node_standard_deviation_predictions_by_lead_day.csv",
             index=False,
         )
 
@@ -1620,7 +1618,7 @@ def save_prediction_outputs(
         metric_standard=metric_standard,
         metric_threshold=metric_threshold,
     )
-    with open(run_dir / "test_metrics_physical_scale.json", "w", encoding="utf-8") as f:
+    with open(logs_dir / "test_metrics_physical_scale.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "metric_standard": metric_standard,

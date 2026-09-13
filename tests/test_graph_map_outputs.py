@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import sys
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 import matplotlib.image as mpimg
@@ -93,7 +94,6 @@ class GraphMapOutputTests(unittest.TestCase):
             model,
             self.positions,
             filename="initial_graph.png",
-            title="Initial station graph ($W_{adj}$)",
             boundary_geojson=_BOUNDARY,
         )
 
@@ -103,6 +103,30 @@ class GraphMapOutputTests(unittest.TestCase):
         image = mpimg.imread(path)
         self.assertGreater(image.shape[0], 0)
         self.assertGreater(image.shape[1], 0)
+
+    def test_weighted_graph_has_no_title_node_labels_or_colorbar_label(self):
+        model = _AdjacencyModel(
+            [
+                [1.0, 0.2, 0.0],
+                [0.2, 1.0, 0.85],
+                [0.0, 0.85, 1.0],
+            ]
+        )
+
+        with patch("Evaluation.experiment_outputs.save_figure", autospec=True) as save_figure:
+            save_weighted_graph_plot(
+                self.temporary,
+                model,
+                self.positions,
+                boundary_geojson=_BOUNDARY,
+            )
+
+        figure = save_figure.call_args.args[0]
+        map_axis, colorbar_axis = figure.axes
+        self.assertEqual(map_axis.get_title(), "")
+        self.assertEqual(len(map_axis.texts), 0)
+        self.assertEqual(colorbar_axis.get_ylabel(), "")
+        self.assertTrue(any(label.get_text() for label in colorbar_axis.get_yticklabels()))
 
     def test_weighted_graph_rejects_matrix_station_mismatch(self):
         model = _AdjacencyModel(np.eye(2))

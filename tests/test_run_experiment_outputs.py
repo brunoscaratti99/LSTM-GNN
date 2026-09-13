@@ -60,7 +60,10 @@ class ExperimentParametersMarkdownTests(unittest.TestCase):
         for name in expected_names:
             self.assertEqual(sum(f"| `{name}` |" in row for row in parameter_rows), 1, name)
         self.assertIn(r"`RS\|SC`", content)
-        self.assertIn("| `LEARN_STD` | `true` |", content)
+        self.assertIn(
+            f"| `LEARN_STD` | `{str(bool(experiment_runner.LEARN_STD)).lower()}` |",
+            content,
+        )
         self.assertIn(
             f"| `LEARN_SELF_ATT` | `{str(bool(experiment_runner.LEARN_SELF_ATT)).lower()}` |",
             content,
@@ -215,7 +218,12 @@ class NodeStandardDeviationPlotTests(unittest.TestCase):
                     plot_station_name="Station A",
                 )
 
-            self.assertEqual(save_figure.call_args.args[0].axes[0].get_xlabel(), "")
+            axis = save_figure.call_args.args[0].axes[0]
+            self.assertEqual(axis.get_xlabel(), "")
+            self.assertEqual(
+                [text.get_text() for text in axis.get_legend().get_texts()],
+                ["ERA5 Lead day 1", "GLSTM Lead Day 1"],
+            )
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 

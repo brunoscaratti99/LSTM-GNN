@@ -103,6 +103,10 @@ class TimePeriodPlotTests(unittest.TestCase):
         axis = save_figure.call_args.args[0].axes[0]
         self.assertEqual(axis.get_xlabel(), "")
         self.assertGreater(len(axis.get_xticks()), 0)
+        self.assertEqual(
+            [text.get_text() for text in axis.get_legend().get_texts()],
+            ["ERA5 Lead day 1", "GLSTM Lead Day 1"],
+        )
 
     def test_rejects_empty_date_period(self):
         frame = pd.DataFrame(
@@ -127,14 +131,17 @@ class TimePeriodPlotTests(unittest.TestCase):
     def test_model_run_is_used_to_generate_the_period_predictions(self):
         run_dir = self.temporary / "run"
         run_dir.mkdir()
-        (run_dir / "config.json").write_text('{"forecast_horizon": 2}', encoding="utf-8")
+        logs_dir = run_dir / "logs"
+        logs_dir.mkdir()
+        (logs_dir / "config.json").write_text('{"forecast_horizon": 2}', encoding="utf-8")
 
         def fake_run_inference(run, **kwargs):
             self.assertEqual(Path(run), run_dir.resolve())
             self.assertEqual(kwargs["start_date"], "2024-04-30")
             self.assertEqual(kwargs["end_date"], "2024-05-02")
             destination = Path(kwargs["output_dir"])
-            destination.mkdir(parents=True)
+            destination_logs = destination / "logs"
+            destination_logs.mkdir(parents=True)
             pd.DataFrame(
                 [
                     {
@@ -152,7 +159,7 @@ class TimePeriodPlotTests(unittest.TestCase):
                         "predicted_mm": 2.5,
                     },
                 ]
-            ).to_csv(destination / "inference_predictions_by_lead_day.csv", index=False)
+            ).to_csv(destination_logs / "inference_predictions_by_lead_day.csv", index=False)
             return destination
 
         output = self.temporary / "model_period.png"

@@ -41,12 +41,14 @@ if str(ROOT / "src") not in sys.path:
 
 from Evaluation.plot_style import (  # noqa: E402
     apply_seaborn_theme,
+    lead_day_legend_labels,
     prediction_palette,
     save_figure,
     style_time_axis,
 )
 from Evaluation.experiment_outputs import _normalize_station_name  # noqa: E402
 from inference import run_inference  # noqa: E402
+from output_layout import resolve_run_artifact  # noqa: E402
 
 
 RUN_DIR: Path | None = Path(r"C:\Local Repository\LSTM-GNN\Experiments\run_experiment\07_09_2026\glstm_sweep_20260909_124805")
@@ -175,6 +177,7 @@ def save_timeperiod_plot(
 
     palette = prediction_palette()
     for axis, current_lead in zip(axes_flat, lead_days):
+        era5_label, glstm_label = lead_day_legend_labels(current_lead)
         values = frame[frame["lead_day"] == current_lead].copy()
         values = values.sort_values("target_time")
         values = values.groupby("target_time", as_index=False)[
@@ -193,7 +196,7 @@ def save_timeperiod_plot(
                 ax=axis,
                 color=palette["actual"],
                 linewidth=2.0,
-                label=f"Actual D+{current_lead}",
+                label=era5_label,
                 estimator=None,
                 errorbar=None,
             )
@@ -203,7 +206,7 @@ def save_timeperiod_plot(
                 ax=axis,
                 color=palette["predicted"],
                 linewidth=2.0,
-                label=f"Predicted D+{current_lead}",
+                label=glstm_label,
                 estimator=None,
                 errorbar=None,
             )
@@ -230,14 +233,14 @@ def save_timeperiod_plot(
 
 
 def _forecast_horizon(run_dir: Path) -> int:
-    config_path = run_dir / "config.json"
+    config_path = resolve_run_artifact(run_dir, "config.json")
     if not config_path.exists():
         raise FileNotFoundError(f"Required run artifact not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as file:
         config = json.load(file)
     raw_horizon = config.get("forecast_horizon")
     if raw_horizon is None:
-        summary_path = run_dir / "run_summary.json"
+        summary_path = resolve_run_artifact(run_dir, "run_summary.json")
         if summary_path.exists():
             with open(summary_path, "r", encoding="utf-8") as file:
                 raw_horizon = json.load(file).get("horizon")
@@ -303,7 +306,9 @@ def create_timeperiod_plot(
             show_progress=show_progress,
             progress_time_chunk_days=progress_time_chunk_days,
         )
-        predictions = pd.read_csv(generated_dir / "inference_predictions_by_lead_day.csv")
+        predictions = pd.read_csv(
+            resolve_run_artifact(generated_dir, "inference_predictions_by_lead_day.csv")
+        )
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
 

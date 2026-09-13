@@ -51,6 +51,7 @@ from Training.Training_Routines import (
     resolve_adaptative_lr_metric,
     train_stable,
 )
+from output_layout import log_artifact_path, logs_directory
 from Training.experiment_runner import (
     ExperimentRunConfig,
     build_model,
@@ -78,7 +79,7 @@ INCLUDE_WIND = False
 INCLUDE_VERTICAL_VELOCITY = True    
 
 # Windowing and split
-WINDOW_SIZE = [15]
+WINDOW_SIZE = [30]
 FORECAST_HORIZON = 5
 TRAIN_RATIO = 0.6
 VAL_RATIO = 0.2
@@ -99,7 +100,7 @@ MODEL_TYPE = "glstm"  # "glstm" or "transformer"
 # True selects a distinct LSTM and output head for every station: no edges,
 # graph aggregation, or parameter sharing across nodes. False uses the GLSTM.
 EMPTY_GRAPH = False
-K_NEIGHBORS = 5
+K_NEIGHBORS = [2,3,5,15,30,61]
 HIDDEN_DIM = [128]
 LSTM_LAYERS = [2]
 LEARN_ADJ = True  # If True, the adjacency matrix is learnable. Otherwise, it is fixed.
@@ -108,12 +109,12 @@ LOCK_TOPOLOGY = True  # True: only initial edges; False: new edges may be learne
 # Initial graph prior for the KNN edges. Choices: "gaussian", "ones",
 # "inverse_distance", or "climatology_correlation". Gaussian distances and
 # sigma are in kilometres; climatology uses only the chronological train split.
-STATION_SIMILARITY = "gaussian"
-STATION_SIMILARITY_SIGMA_KM = [150]
-DROPOUT = [0.0]
+STATION_SIMILARITY = "gaussian"  # "gaussian", "ones", "inverse_distance", or "climatology_correlation".
+STATION_SIMILARITY_SIGMA_KM = [150.00]
+DROPOUT = [0.1,0.3]
 # Adds a GLSTM auxiliary head that predicts the population SD across stations
 # for every forecast lead day. False preserves the original single-output model.
-LEARN_STD = not EMPTY_GRAPH
+LEARN_STD = False
 
 # Training
 EPOCHS = 400
@@ -140,11 +141,11 @@ DEBUG_CHECKS = False
 # Comparative grid. Every experiment/runtime setting can be a scalar or a list.
 # Example: HIDDEN_DIM = [128, 256]; comparative_parameter = "hidden_dim".
 # Multiple lists form a Cartesian product; see run_comparative_experiments().
-COMPARATIVE_RUN: bool = False
-COMPARATIVE_PARAMETER: str = "STATION_SIMILARITY_SIGMA_KM"
+COMPARATIVE_RUN: bool = True
+COMPARATIVE_PARAMETER: str = "K_NEIGHBORS"
 
 # Output
-OUTPUT_ROOT = ROOT / "Experiments" / "run_experiment" / "07_09_2026"
+OUTPUT_ROOT = ROOT / "Experiments" / "run_experiment" / "10_09_2026"
 SWEEP_NAME = None
 SHOW_CONSOLE_INFO = True
 PROGRESS_TIME_CHUNK_DAYS = 30
@@ -528,6 +529,7 @@ def run_experiment(
     torch.manual_seed(config.random_seed)
     np.random.seed(config.random_seed)
     run_dir = run_directory(output_root, sweep_name)
+    logs_dir = logs_directory(run_dir, create=True)
     effective_parameters = dict(source_parameters)
     effective_parameters.update(asdict(config))
     effective_parameters.update(runtime)
@@ -655,7 +657,6 @@ def run_experiment(
         model,
         _pos,
         filename="initial_graph.png",
-        title="Initial station graph ($W_{adj}$)",
     )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -675,7 +676,7 @@ def run_experiment(
     config_payload = asdict(config)
     if comparison_metadata is not None:
         config_payload["comparative"] = dict(comparison_metadata)
-    _write_json(run_dir / "config.json", config_payload)
+    _write_json(logs_dir / "config.json", config_payload)
     save_dataset_contract(run_dir, X_da, y_da, windowed, scaled_windowed, config)
     save_inference_state(run_dir, model, edge_index, stations, X_da, scaling_state)
 
@@ -707,7 +708,7 @@ def run_experiment(
     )
     if comparison_metadata is not None:
         summary["comparative"] = _json_safe(dict(comparison_metadata))
-        _write_json(run_dir / "run_summary.json", summary)
+        _write_json(logs_dir / "run_summary.json", summary)
 
     test_metrics = eval_with_loader_stable(
         trained_model,
@@ -725,7 +726,7 @@ def run_experiment(
     test_metrics["metric_units"] = (
         "normalized_target" if scaling_state.target_scaler is not None else "mm"
     )
-    _write_json(run_dir / "test_metrics.json", test_metrics)
+    _write_json(logs_dir / "test_metrics.json", test_metrics)
 
     collected_predictions = collect_model_predictions(
         trained_model,
@@ -867,8 +868,8 @@ def run_comparative_experiments(
 
         record["status"] = "completed"
         record["run_dir"] = str(run_dir.relative_to(sweep_dir))
-        record["run_summary"] = _read_json(run_dir / "run_summary.json")
-        record["test_metrics"] = _read_json(run_dir / "test_metrics.json")
+        record["run_summary"] = _read_json(log_artifact_path(run_dir, "run_summary.json"))
+        record["test_metrics"] = _read_json(log_artifact_path(run_dir, "test_metrics.json"))
         _write_json(manifest_path, manifest)
 
     comparative_analysis = save_comparative_outputs(sweep_dir, manifest)

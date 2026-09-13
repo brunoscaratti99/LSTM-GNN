@@ -68,6 +68,8 @@ Functions:
   y-only grid so date series remain readable when imported into Beamer.
 - `save_figure(fig, output_path, dpi=190, tight=True)`: creates parent folders and writes a figure.
 - `prediction_palette()`: returns a shared color palette for actual/predicted/train/validation/error series.
+- `lead_day_legend_labels(lead_day)`: returns the standardized `ERA5 Lead day i` and
+  `GLSTM Lead Day i` labels for paired forecast series.
 
 ## `experiment_outputs.py`
 
@@ -79,8 +81,8 @@ Functions:
 - `_model_adjacency_matrix(model, normalized=False)`: extracts a model adjacency matrix through `current_adjacency(...)` when available. For GLSTM this includes the effective diagonal: fixed identity entries with `learn_self_att=False`, or positive station-specific weights with `True`.
 - `_heatmap_ticks(n_items)`: computes readable heatmap tick locations.
 - `save_topology_heatmap(run_dir, model, station_names, filename="final_adjacency.png", title=...)`: saves an adjacency heatmap from the model's current state, including the GLSTM's calibrated diagonal when `learn_self_att=True`. The runner writes `topology/initial_adjacency.png` before training and `topology/final_adjacency.png` after restoring the best validation checkpoint.
-- `save_graph_plot(run_dir, edge_index, pos, filename="graph.png", boundary_geojson=None)`: saves the initial station graph topology over the IBGE boundary of Rio Grande do Sul. `boundary_geojson` supports deterministic/offline callers; otherwise the boundary loader used by `RS_state_map.py` is reused and cached in memory. The runner writes it as `topology/graph.png`.
-- `save_weighted_graph_plot(run_dir, model, pos, filename="weighted_graph.png", title=..., boundary_geojson=None)`: saves raw `W_adj` over the same RS map. Self-loops are omitted from this geographic plot even when their GLSTM weights are learned; inspect the topology heatmap for those diagonal values. Edge color represents `|W_adj[i,j]|`, and larger weights use thicker lines. The runner writes `topology/initial_graph.png` before training and `topology/weighted_graph.png` after restoring the best validation checkpoint.
+- `save_graph_plot(run_dir, edge_index, pos, filename="graph.png", boundary_geojson=None)`: saves the initial station graph topology over the IBGE boundary of Rio Grande do Sul without a figure title or station-number labels. `boundary_geojson` supports deterministic/offline callers; otherwise the boundary loader used by `RS_state_map.py` is reused and cached in memory. The runner writes it as `topology/graph.png`.
+- `save_weighted_graph_plot(run_dir, model, pos, filename="weighted_graph.png", boundary_geojson=None)`: saves raw `W_adj` over the same unlabeled RS map. Self-loops are omitted from this geographic plot even when their GLSTM weights are learned; inspect the topology heatmap for those diagonal values. Edge color represents `|W_adj[i,j]|`, and larger weights use thicker lines. Its colorbar has numeric ticks but no text label. The runner writes `topology/initial_graph.png` before training and `topology/weighted_graph.png` after restoring the best validation checkpoint.
 - `_inverse_target_scale(values, target_scaler)`: inverse-transforms prediction arrays when a target scaler exists.
 - `target_standard_deviation_to_physical_scale(values, target_scaler=None)`: maps learned target-scale standard deviations to millimetres using only the scaler's multiplicative scale, never its offset.
 - `_prepare_prediction_arrays(y_true, y_pred, target_scaler=None)`: validates prediction shapes and returns physical-scale arrays.
@@ -96,22 +98,22 @@ Functions:
 - `_resolve_plot_station(requested_station, station_names)`: resolves the station requested in the runner config.
 - `_station_series(values, station_idx)`: extracts `[sample, lead_day]` data for one station.
 - `_prediction_dataframe(actual, predicted, target_times, station_names)`: expands predictions into a long-form CSV table.
-- `save_dataset_contract(run_dir, raw_X, raw_y, windowed, scaled_windowed, config)`: writes dimensions, features, station names, date range, scaler flags, and tensor-boundary notes.
+- `save_dataset_contract(run_dir, raw_X, raw_y, windowed, scaled_windowed, config)`: writes dimensions, features, station names, date range, scaler flags, and tensor-boundary notes to `logs/dataset_contract.json`.
 - `_serialize_scaler_state(scaler)`: converts a fitted StandardScaler or MinMaxScaler into numeric JSON state.
 - `_model_build_state(model)`: records effective non-tensor constructor options, including GLSTM `cell_clip`, `adjacency_scope`, `learn_self_att`, and `learn_std` plus Transformer heads/layer counts, which are not recoverable from tensor shapes alone. Persisting `learn_self_att` distinguishes a learned positive diagonal from the legacy fixed identity diagonal during reconstruction.
-- `save_inference_state(run_dir, model, edge_index, stations, raw_X, scaling_state)`: writes `inference_state.json` with the exact model-construction options, including the GLSTM diagonal-learning choice, node/feature order, station coordinates, base `edge_index`, and fitted feature/target scaler state required to reload a run portably.
+- `save_inference_state(run_dir, model, edge_index, stations, raw_X, scaling_state)`: writes `logs/inference_state.json` with the exact model-construction options, including the GLSTM diagonal-learning choice, node/feature order, station coordinates, base `edge_index`, and fitted feature/target scaler state required to reload a run portably.
 - `_save_prediction_overview(...)`: writes overview time-series and all-point scatter plots.
 - `_save_prediction_timeseries_splits(...)`: writes station time-series plots split into several chronological chunks for each lead day.
 - `_save_absolute_error_boxplots(...)`: writes `forecast_horizon_diagnostics/15_absolute_prediction_error_boxplots.png`, with one Seaborn boxplot of `|actual_mm - predicted_mm|` for each lead day and one final all-leads box. It uses every finite station/sample prediction directly; with the default five-day horizon this produces six boxes.
-- `_save_forecast_lead_day_diagnostics(...)`: writes per-lead CSVs, metrics, error curves, scatter plots, and time-series diagnostics. All generated date series retain formatted date ticks but omit the lower `Target date` label.
-- `save_oversmoothing_diagnostics(run_dir, actual, predicted, target_times, model=..., edge_index=...)`: writes all-node spatial-collapse diagnostics to `oversmoothing_diagnostics/`. It saves cross-node standard deviation over time in item 1, daily all-station precipitation means in item 2, predicted/actual dispersion ratio by lead day in item 3, predicted-versus-actual cross-node spread scatters in item 4, and graph Dirichlet energy over time using the final model adjacency in item 6. Items 1 and 2 use matching solid Real/Prediction curves of width 2.0; item 1 is a 30-day spread mean and item 2 is the daily station mean. Time-series subplots do not include a `Target date` x-axis label, and lead titles use `Lead Day i`. The raw time-aligned measurements and lead-day summary are also saved as CSV files.
+- `_save_forecast_lead_day_diagnostics(...)`: writes per-lead CSVs under `logs/forecast_horizon_diagnostics/`, plus error curves, scatter plots, and time-series diagnostics. All generated date series retain formatted date ticks but omit the lower `Target date` label.
+- `save_oversmoothing_diagnostics(run_dir, actual, predicted, target_times, model=..., edge_index=...)`: writes all-node spatial-collapse diagnostic figures to `oversmoothing_diagnostics/` and matching CSV tables to `logs/oversmoothing_diagnostics/`. It saves cross-node standard deviation over time in item 1, daily all-station precipitation means in item 2, predicted/actual dispersion ratio by lead day in item 3, predicted-versus-actual cross-node spread scatters in item 4, and graph Dirichlet energy over time using the final model adjacency in item 6. Items 1 and 2 use matching solid Real/Prediction curves of width 2.0; item 1 is a 30-day spread mean and item 2 is the daily station mean. Time-series subplots do not include a `Target date` x-axis label, and lead titles use `Lead Day i`.
 - `save_prediction_outputs(..., metric_standard=None, metric_threshold=0.0, predicted_node_std=None)`:
   public orchestrator that writes all prediction CSVs and plots for a run. It
   adds `metric_eligible` to prediction rows, writes
-  `test_metrics_physical_scale.json`, applies the policy to lead-day metrics,
+  `logs/test_metrics_physical_scale.json`, applies the policy to lead-day metrics,
   and includes `oversmoothing_diagnostics/` when supplied the trained graph
   model and/or base `edge_index`. When the auxiliary GLSTM output is supplied,
-  it also writes `test_node_standard_deviation_predictions_by_lead_day.csv`
+  it also writes `logs/test_node_standard_deviation_predictions_by_lead_day.csv`
   with one physical-scale real/predicted spread pair per sample and lead day.
   This learned output remains distinct from the standard deviation derived
   directly from the station forecast matrix in oversmoothing diagnostics.
@@ -131,15 +133,15 @@ Functions:
 ## `comparative_outputs.py`
 
 Sweep-level artifacts for `run_comparative_experiments(...)`. The module reads each
-completed run's `hist.pt` and `test_predictions_by_lead_day.csv`; it never uses
+completed run's `logs/hist.pt` and `logs/test_predictions_by_lead_day.csv`; it never uses
 an individual run PNG as the source of a comparison.
 
 Functions:
 
-- `filter_complete_run_records(sweep_dir, manifest)`: validates sweep records before report generation. A run is report-ready when its run folder exists and contains `hist.pt`; the manifest status is not used as the inclusion criterion.
+- `filter_complete_run_records(sweep_dir, manifest)`: validates sweep records before report generation. A run is report-ready when its run folder exists and contains `logs/hist.pt`; the manifest status is not used as the inclusion criterion.
 - `save_comparative_outputs(sweep_dir, manifest)`: creates the
   `comparative_analysis/` directory after a completed grid, recalculates
-  selected-station metrics on the common target dates when prediction CSVs are present, skips runs without `hist.pt`,
+  selected-station metrics on the common target dates when prediction CSVs are present, skips runs without `logs/hist.pt`,
   and returns artifact metadata for `comparative_summary.json`.
 
 Root helper:
@@ -147,7 +149,7 @@ Root helper:
 - `python create_comparative_report.py <comparative_folder>`: regenerates
   `comparative_analysis/report_compare.tex` and its supporting comparison
   figures from an existing `comparative_*` folder without rerunning training.
-  A path to one of the sweep's `run_*` folders, its `hist.pt`, the sweep's
+  A path to one of the sweep's `run_*` folders, its `logs/hist.pt`, the sweep's
   `comparative_summary.json`, or `comparative_analysis/` is also accepted and
   resolved back to the containing sweep.
 - `python create_comparative_report.py --search-root Experiments/run_experiment`
@@ -156,7 +158,7 @@ Root helper:
   run found in descendant `comparative_*` folders. The aggregate labels include
   the source sweep and run name, and incomplete runs are still skipped.
   It still reads `comparative_summary.json` as the sweep manifest, but uses
-  `hist.pt` inside each run folder as the run-inclusion indicator.
+  `logs/hist.pt` inside each run folder as the run-inclusion indicator.
 
 Generated files:
 
@@ -170,7 +172,7 @@ Generated files:
   configuration predictions for the selected station on common dates.
 - `02_test_scatter_comparison_lead_day_XX.png`: side-by-side selected-station
   scatters with shared axes, identity line, RMSE, MAE, and R2.
-- `station_metrics_common_dates.csv`: per-run/per-lead selected-station metrics.
+- `logs/station_metrics_common_dates.csv`: per-run/per-lead selected-station metrics.
 - `report_compare.tex`: LaTeX source that embeds the generated figures, an
   overview table across all lead days, and one metrics table per lead day.
   Best RMSE, MAE, and R2 values are bolded per table. The report states the
@@ -201,9 +203,11 @@ Functions:
 - `analisar_experimentos(...)`: high-level legacy experiment analysis entry point.
 - `save_error_plots(...)`: writes train/validation MSE, MAE, and R2 curves.
 - `model_weights_hist(model)`: plots model weight distributions.
-- `plot_estacao_unica(...)`: plots one station's real vs predicted precipitation series.
+- `plot_estacao_unica(..., lead_day=1)`: plots one station's real vs predicted precipitation
+  series with standardized lead-day legend labels.
 - `_flatten_unique_days(y, stride=1)`: removes overlapped days from batched forecasts.
-- `plot_precip_pred_vs_true(...)`: plots precipitation predictions without repeated days.
+- `plot_precip_pred_vs_true(..., lead_day=None)`: plots precipitation predictions without
+  repeated days; pass a lead day for the standardized paired legend labels.
 - `prever_futuro_precip_todos_nos(...)`: autoregressive future forecast helper for all stations.
 - `plot_por_hiperparametro_train_val_lstm_glstm(...)`: larger-format variant for comparing LSTM/GLSTM groups.
 
