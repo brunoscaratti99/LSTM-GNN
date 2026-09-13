@@ -36,6 +36,11 @@ Functions:
 - `numpy_regression_metrics(...)`: computes MSE, RMSE, MAE, R2, bias, and the
   eligible-target count. In modified mode it uses only finite pairs for which
   `y_true > metric_threshold`.
+- `numpy_rain_classification_metrics(y_true, y_pred, threshold=0.0)`: computes
+  precision, recall, accuracy, ROC AUC, target count, and a `[[TN, FP], [FN,
+  TP]]` rain/no-rain matrix from finite physical-scale pairs. Rain is defined
+  strictly as precipitation above the supplied threshold; AUC is `NaN` when a
+  test split has only one class.
 - `combined_loss(y_pred, y_true, alpha=0.5)`: blends MSE and MAE-style behavior using a weighting parameter.
 - `weighted_mse_loss(...)`: increases squared-error weight for extreme precipitation values. Inputs are prediction/target tensors and quantile/weight settings.
 - `_init_r2_tracker(horizon, device=None)`: creates global and per-step accumulators for streaming R2.
@@ -91,6 +96,9 @@ Functions:
 - `_safe_regression_metrics(actual, predicted, metric_standard=None, metric_threshold=0.0)`:
   computes physical MSE, RMSE, MAE, R2, bias, and eligible-target count while
   ignoring non-finite pairs and applying the configured strict threshold.
+- `_save_rain_confusion_matrix(run_dir, classification_metrics, threshold=...)`:
+  writes `confusion_matrix.png`, with real classes on rows and predicted classes
+  on columns, using the Portuguese labels `Não chove` and `Chove`.
 - `_axis_limits(actual, predicted)`: creates padded shared limits for true-vs-predicted plots.
 - `_cross_node_mean(values)`: returns the finite daily mean across stations for each sample and forecast lead.
 - `_station_mean(values)`: averages a prediction array across stations.
@@ -107,16 +115,19 @@ Functions:
 - `_save_absolute_error_boxplots(...)`: writes `forecast_horizon_diagnostics/15_absolute_prediction_error_boxplots.png`, with one Seaborn boxplot of `|actual_mm - predicted_mm|` for each lead day and one final all-leads box. It uses every finite station/sample prediction directly; with the default five-day horizon this produces six boxes.
 - `_save_forecast_lead_day_diagnostics(...)`: writes per-lead CSVs under `logs/forecast_horizon_diagnostics/`, plus error curves, scatter plots, and time-series diagnostics. All generated date series retain formatted date ticks but omit the lower `Target date` label.
 - `save_oversmoothing_diagnostics(run_dir, actual, predicted, target_times, model=..., edge_index=...)`: writes all-node spatial-collapse diagnostic figures to `oversmoothing_diagnostics/` and matching CSV tables to `logs/oversmoothing_diagnostics/`. It saves cross-node standard deviation over time in item 1, daily all-station precipitation means in item 2, predicted/actual dispersion ratio by lead day in item 3, predicted-versus-actual cross-node spread scatters in item 4, and graph Dirichlet energy over time using the final model adjacency in item 6. Items 1 and 2 use matching solid Real/Prediction curves of width 2.0; item 1 is a 30-day spread mean and item 2 is the daily station mean. Time-series subplots do not include a `Target date` x-axis label, and lead titles use `Lead Day i`.
-- `save_prediction_outputs(..., metric_standard=None, metric_threshold=0.0, predicted_node_std=None)`:
+- `save_prediction_outputs(..., metric_standard=None, metric_threshold=0.0, confusion_matrix_threshold=0.0, predicted_node_std=None)`:
   public orchestrator that writes all prediction CSVs and plots for a run. It
   adds `metric_eligible` to prediction rows, writes
-  `logs/test_metrics_physical_scale.json`, applies the policy to lead-day metrics,
-  and includes `oversmoothing_diagnostics/` when supplied the trained graph
-  model and/or base `edge_index`. When the auxiliary GLSTM output is supplied,
-  it also writes `logs/test_node_standard_deviation_predictions_by_lead_day.csv`
-  with one physical-scale real/predicted spread pair per sample and lead day.
-  This learned output remains distinct from the standard deviation derived
-  directly from the station forecast matrix in oversmoothing diagnostics.
+  `logs/test_metrics_physical_scale.json`, adds physical-scale precision,
+  recall, accuracy, and AUC based on `confusion_matrix_threshold`, writes the
+  matching `logs/test_confusion_matrix.json` and `confusion_matrix.png`, applies
+  the regression policy to lead-day metrics, and includes
+  `oversmoothing_diagnostics/` when supplied the trained graph model and/or base
+  `edge_index`. When the auxiliary GLSTM output is supplied, it also writes
+  `logs/test_node_standard_deviation_predictions_by_lead_day.csv` with one
+  physical-scale real/predicted spread pair per sample and lead day. This learned
+  output remains distinct from the standard deviation derived directly from the
+  station forecast matrix in oversmoothing diagnostics.
 
 ## `rs_animation_maps.py`
 

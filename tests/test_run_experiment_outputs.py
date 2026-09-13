@@ -51,10 +51,11 @@ class ExperimentParametersMarkdownTests(unittest.TestCase):
 
         self.assertEqual(path.name, "parameters.md")
         self.assertEqual(len(parameter_rows), len(expected_names))
-        self.assertEqual(len(expected_names), 57)
+        self.assertEqual(len(expected_names), 58)
         self.assertIn("EMPTY_GRAPH", expected_names)
         self.assertIn("LEARN_STD", expected_names)
         self.assertIn("LEARN_SELF_ATT", expected_names)
+        self.assertIn("CONFUSION_MATRIX_THRESHOLD", expected_names)
         self.assertIn("STATION_SIMILARITY", expected_names)
         self.assertIn("STATION_SIMILARITY_SIGMA_KM", expected_names)
         for name in expected_names:
@@ -121,7 +122,7 @@ class ExperimentParametersMarkdownTests(unittest.TestCase):
         self.assertIn("| `LSTM_LAYERS` | `2` |", content)
         self.assertEqual(
             len([line for line in content.splitlines() if line.startswith("| `")]),
-            57,
+            58,
         )
 
 

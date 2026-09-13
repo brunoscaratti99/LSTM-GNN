@@ -102,6 +102,112 @@ def numpy_regression_metrics(
     }
 
 
+def _binary_roc_auc(actual_rain: np.ndarray, prediction_scores: np.ndarray) -> float:
+    """Return ROC AUC from binary labels and continuous scores without sklearn.
+
+    Average ranks are assigned to tied scores.  AUC is undefined when the
+    selected data contain only one class, in which case ``NaN`` is returned.
+    """
+    labels = np.asarray(actual_rain, dtype=bool).reshape(-1)
+    scores = np.asarray(prediction_scores, dtype=float).reshape(-1)
+    positives = int(np.count_nonzero(labels))
+    negatives = int(labels.size - positives)
+    if positives == 0 or negatives == 0:
+        return float("nan")
+
+    order = np.argsort(scores, kind="mergesort")
+    sorted_scores = scores[order]
+    ranks = np.empty(scores.size, dtype=float)
+    start = 0
+    while start < scores.size:
+        end = start + 1
+        while end < scores.size and sorted_scores[end] == sorted_scores[start]:
+            end += 1
+        # Ranks are one-based; tied values receive their average rank.
+        ranks[order[start:end]] = (start + 1 + end) / 2.0
+        start = end
+
+    positive_rank_sum = float(ranks[labels].sum())
+    return float(
+        (positive_rank_sum - positives * (positives + 1) / 2.0)
+        / (positives * negatives)
+    )
+
+
+def numpy_rain_classification_metrics(
+    y_true,
+    y_pred,
+    *,
+    threshold=0.0,
+):
+    """Classify precipitation as rain/no-rain and calculate test metrics.
+
+    ``threshold`` must be finite and use the same scale as the inputs. A target
+    or forecast is classified as rain only when it is strictly greater than the
+    threshold. The returned matrix uses the conventional layout ``[[TN, FP],
+    [FN, TP]]``: rows are actual no-rain/rain and columns are predicted
+    no-rain/rain. The helper permits negative thresholds so it can operate on
+    standardized target tensors; runner configuration still validates the
+    physical millimetre threshold as non-negative.
+    """
+    if isinstance(threshold, bool):
+        raise ValueError("Classification threshold must be a finite number.")
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Classification threshold must be a finite number.") from exc
+    if not math.isfinite(threshold):
+        raise ValueError("Classification threshold must be a finite number.")
+    actual = np.asarray(y_true, dtype=float)
+    predicted = np.asarray(y_pred, dtype=float)
+    if actual.shape != predicted.shape:
+        raise ValueError(
+            f"Classification shape mismatch: actual={actual.shape}, predicted={predicted.shape}."
+        )
+
+    finite = np.isfinite(actual) & np.isfinite(predicted)
+    selected_actual = actual[finite]
+    selected_predicted = predicted[finite]
+    actual_rain = selected_actual > threshold
+    predicted_rain = selected_predicted > threshold
+
+    true_negative = int(np.count_nonzero(~actual_rain & ~predicted_rain))
+    false_positive = int(np.count_nonzero(~actual_rain & predicted_rain))
+    false_negative = int(np.count_nonzero(actual_rain & ~predicted_rain))
+    true_positive = int(np.count_nonzero(actual_rain & predicted_rain))
+    count = int(selected_actual.size)
+
+    predicted_positive = true_positive + false_positive
+    actual_positive = true_positive + false_negative
+    precision = (
+        float(true_positive / predicted_positive)
+        if predicted_positive
+        else float("nan")
+    )
+    recall = (
+        float(true_positive / actual_positive)
+        if actual_positive
+        else float("nan")
+    )
+    accuracy = float((true_positive + true_negative) / count) if count else float("nan")
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "accuracy": accuracy,
+        "auc": _binary_roc_auc(actual_rain, selected_predicted),
+        "n_classification_targets": count,
+        "true_negative": true_negative,
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "true_positive": true_positive,
+        "confusion_matrix": [
+            [true_negative, false_positive],
+            [false_negative, true_positive],
+        ],
+    }
+
+
 
 def safe_r2(y_true, y_pred, eps=1e-8):
     ss_res = torch.sum((y_true - y_pred) ** 2)

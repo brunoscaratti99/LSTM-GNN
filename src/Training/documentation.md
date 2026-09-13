@@ -26,7 +26,7 @@ Shared helper layer used by `src/run_experiment.py`.
 
 Classes:
 
-- `ExperimentRunConfig`: frozen dataclass capturing date range, feature switches, split/window settings, scaler policy, model settings (including `empty_graph`, `learn_adj`, `lock_topology`, and the GLSTM-only `learn_self_att` and `learn_std` options), training settings (including optional `warm_up`), `metric_standard`/`metric_threshold`, loss settings, plot station, and daily-cache policy. `empty_graph=True` selects a separate LSTM and output head per station, without shared node parameters or graph edges; it requires `learn_std=False` and `learn_self_att=False`. The dataclass default for `learn_self_att` is `False` so legacy configurations keep the fixed identity diagonal.
+- `ExperimentRunConfig`: frozen dataclass capturing date range, feature switches, split/window settings, scaler policy, model settings (including `empty_graph`, `learn_adj`, `lock_topology`, and the GLSTM-only `learn_self_att` and `learn_std` options), training settings (including optional `warm_up`), regression `metric_standard`/`metric_threshold`, the physical-scale rain/no-rain `confusion_matrix_threshold`, loss settings, plot station, and daily-cache policy. `empty_graph=True` selects a separate LSTM and output head per station, without shared node parameters or graph edges; it requires `learn_std=False` and `learn_self_att=False`. The dataclass default for `learn_self_att` is `False` so legacy configurations keep the fixed identity diagonal.
 - `QuantileMSELoss`: `nn.Module` implementing weighted MSE using train-only target quantile thresholds. It stores thresholds and bin weights as buffers.
 
 Functions:
@@ -77,6 +77,13 @@ grid.
   source-selectable settings and their effective values. Comparative parents also
   write the table, preserving candidate lists, while each child records its
   materialized scalar choices.
+- `CONFUSION_MATRIX_THRESHOLD` is an independent physical precipitation cutoff
+  in millimetres. The runner records precision, recall, accuracy, and AUC in
+  `logs/test_metrics.json` and physical-scale metrics in
+  `logs/test_metrics_physical_scale.json`; it writes `confusion_matrix.png` and
+  `logs/test_confusion_matrix.json` with rows for real classes and columns for
+  predictions. In each case, `Chove` means precipitation strictly greater than
+  the configured cutoff.
 - After every comparative grid finishes, the runner writes
   `comparative_analysis/report_compare.tex`. Its figures compare each run's
   train/validation Loss, RMSE, MAE, and R2 histories; selected-station

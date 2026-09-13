@@ -58,6 +58,7 @@ class ExperimentRunConfig:
     adaptative_lr_metric: str = "loss"
     metric_standard: str | None = None
     metric_threshold: float = 1.0
+    confusion_matrix_threshold: float = 0.0
     learn_std: bool = False
     learn_self_att: bool = False
     station_similarity: str = "gaussian"

@@ -27,6 +27,7 @@ from output_layout import logs_directory
 from Evaluation.metrics import (
     METRIC_STANDARD_MODIFIED,
     normalize_metric_standard,
+    numpy_rain_classification_metrics,
     numpy_regression_metrics,
     validate_metric_threshold,
 )
@@ -378,6 +379,47 @@ def _safe_regression_metrics(
         "bias": metrics["bias"],
         "n_metric_targets": metrics["count"],
     }
+
+
+def _save_rain_confusion_matrix(
+    run_dir: Path,
+    classification_metrics: Mapping[str, object],
+    *,
+    threshold: float,
+) -> Path:
+    """Save an actual-by-predicted rain/no-rain confusion-matrix heatmap."""
+    matrix = np.asarray(classification_metrics["confusion_matrix"], dtype=int)
+    if matrix.shape != (2, 2):
+        raise ValueError("Rain confusion matrix must have shape [2, 2].")
+
+    labels = ["Não chove", "Chove"]
+    figure, axis = plt.subplots(figsize=(6.8, 5.7))
+    sns.heatmap(
+        matrix,
+        annot=True,
+        fmt="d",
+        cmap=sns.color_palette("Blues", as_cmap=True),
+        cbar=False,
+        square=True,
+        linewidths=1.0,
+        linecolor="white",
+        xticklabels=labels,
+        yticklabels=labels,
+        ax=axis,
+        annot_kws={"fontsize": 15, "fontweight": "semibold"},
+    )
+    axis.set_xlabel("Previsto")
+    axis.set_ylabel("Real")
+    axis.set_title(
+        "Matriz de confusão: chove / não chove\n"
+        f"Chove se precipitação > {threshold:g} mm"
+    )
+    axis.tick_params(axis="x", rotation=0)
+    axis.tick_params(axis="y", rotation=0)
+    output_path = Path(run_dir) / "confusion_matrix.png"
+    save_figure(figure, output_path, dpi=190)
+    plt.close(figure)
+    return output_path
 
 
 def _cross_node_standard_deviation(values: np.ndarray) -> np.ndarray:
@@ -1577,11 +1619,18 @@ def save_prediction_outputs(
     edge_index=None,
     metric_standard=None,
     metric_threshold: float = 0.0,
+    confusion_matrix_threshold: float = 0.0,
     predicted_node_std=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Save prediction CSVs and plots in the experiment output directory."""
+    """Save prediction CSVs, metrics, and plots in the experiment output directory.
+
+    The rain/no-rain classification uses physical precipitation values and
+    ``confusion_matrix_threshold`` in millimetres, independently of the
+    optional regression metric policy.
+    """
     metric_standard = normalize_metric_standard(metric_standard)
     metric_threshold = validate_metric_threshold(metric_threshold)
+    confusion_matrix_threshold = validate_metric_threshold(confusion_matrix_threshold)
     run_dir = Path(run_dir)
     actual, predicted = _prepare_prediction_arrays(y_true, y_pred, target_scaler=target_scaler)
     target_times = _target_time_matrix(test_y, n_samples=actual.shape[0], n_leads=actual.shape[1])
@@ -1618,6 +1667,18 @@ def save_prediction_outputs(
         metric_standard=metric_standard,
         metric_threshold=metric_threshold,
     )
+    classification_metrics = numpy_rain_classification_metrics(
+        actual,
+        predicted,
+        threshold=confusion_matrix_threshold,
+    )
+    confusion_matrix_payload = {
+        "confusion_matrix_threshold_mm": confusion_matrix_threshold,
+        "positive_class": f"Chove (precipitação > {confusion_matrix_threshold:g} mm)",
+        "negative_class": f"Não chove (precipitação ≤ {confusion_matrix_threshold:g} mm)",
+        "matrix_layout": "rows=actual [não chove, chove]; columns=predicted [não chove, chove]",
+        **classification_metrics,
+    }
     with open(logs_dir / "test_metrics_physical_scale.json", "w", encoding="utf-8") as f:
         json.dump(
             {
@@ -1629,10 +1690,18 @@ def save_prediction_outputs(
                 ),
                 "metric_units": {"MSE": "mm^2", "RMSE": "mm", "MAE": "mm", "bias": "mm"},
                 **physical_metrics,
+                **confusion_matrix_payload,
             },
             f,
             indent=2,
         )
+    with open(logs_dir / "test_confusion_matrix.json", "w", encoding="utf-8") as f:
+        json.dump(confusion_matrix_payload, f, indent=2)
+    _save_rain_confusion_matrix(
+        run_dir,
+        classification_metrics,
+        threshold=confusion_matrix_threshold,
+    )
 
     _save_prediction_overview(
         run_dir,

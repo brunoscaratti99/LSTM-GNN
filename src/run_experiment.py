@@ -39,6 +39,7 @@ from Evaluation.comparative_outputs import save_comparative_outputs
 from Evaluation.metrics import (
     metric_threshold_in_target_scale,
     normalize_metric_standard,
+    numpy_rain_classification_metrics,
     validate_metric_threshold,
 )
 from Graph.graph_related_utils import (
@@ -94,14 +95,17 @@ TARGET_SCALER = "standard"  # Used only when NORMALIZE_TARGET=True.
 # targets whose physical precipitation is strictly above METRIC_THRESHOLD.
 METRIC_STANDARD = None  # None (legacy/default) or "modified".
 METRIC_THRESHOLD = 15.00 # Millimetres; ignored when METRIC_STANDARD=None.
+# Rain/no-rain evaluation. A target or forecast is classified as rain when its
+# precipitation is strictly greater than this physical-scale threshold.
+CONFUSION_MATRIX_THRESHOLD = 25.00  # Millimetres.
 
 # Graph and model
 MODEL_TYPE = "glstm"  # "glstm" or "transformer"
 # True selects a distinct LSTM and output head for every station: no edges,
 # graph aggregation, or parameter sharing across nodes. False uses the GLSTM.
 EMPTY_GRAPH = False
-K_NEIGHBORS = [2,3,5,15,30,61]
-HIDDEN_DIM = [128]
+K_NEIGHBORS = [5,15]
+HIDDEN_DIM = [64,128]
 LSTM_LAYERS = [2]
 LEARN_ADJ = True  # If True, the adjacency matrix is learnable. Otherwise, it is fixed.
 LEARN_SELF_ATT = False  # If True, GLSTM also calibrates each diagonal/self-loop weight.
@@ -111,13 +115,13 @@ LOCK_TOPOLOGY = True  # True: only initial edges; False: new edges may be learne
 # sigma are in kilometres; climatology uses only the chronological train split.
 STATION_SIMILARITY = "gaussian"  # "gaussian", "ones", "inverse_distance", or "climatology_correlation".
 STATION_SIMILARITY_SIGMA_KM = [150.00]
-DROPOUT = [0.1,0.3]
+DROPOUT = [0.0]
 # Adds a GLSTM auxiliary head that predicts the population SD across stations
 # for every forecast lead day. False preserves the original single-output model.
 LEARN_STD = False
 
 # Training
-EPOCHS = 400
+EPOCHS = 250
 BATCH_SIZE = 64
 LEARNING_RATE = 1e-2
 # Validation metric monitored by ReduceLROnPlateau. Available values:
@@ -126,12 +130,12 @@ LEARNING_RATE = 1e-2
 # requests for unfiltered "loss"/"mape" automatically use modified RMSE.
 ADAPTATIVE_LR_METRIC = "loss"
 WEIGHT_DECAY = 0
-PATIENCE = 150
+PATIENCE = 75
 WARM_UP = 5  # Minimum completed epochs before early stopping may interrupt training.
 ADJ_LR_FACTOR = 1
 MAX_GRAD_NORM = 1
 LOSS = "quantile_mse"  # "mse", "mae", "huber", or "quantile_mse".
-LOSS_QUANTILES = [0.5,0.99]  # Used only when LOSS="quantile_mse".
+LOSS_QUANTILES = [0.5,0.9]  # Used only when LOSS="quantile_mse".
 LOSS_QUANTILE_WEIGHTS = "auto"  # "auto" or one weight per quantile bin.
 LOSS_QUANTILE_MAX_WEIGHT = 50.00
 NUM_WORKERS = 0
@@ -142,7 +146,7 @@ DEBUG_CHECKS = False
 # Example: HIDDEN_DIM = [128, 256]; comparative_parameter = "hidden_dim".
 # Multiple lists form a Cartesian product; see run_comparative_experiments().
 COMPARATIVE_RUN: bool = True
-COMPARATIVE_PARAMETER: str = "K_NEIGHBORS"
+COMPARATIVE_PARAMETER: str = "HIDDEN_DIM"
 
 # Output
 OUTPUT_ROOT = ROOT / "Experiments" / "run_experiment" / "10_09_2026"
@@ -218,6 +222,7 @@ def _default_run_parameter_values() -> dict[str, object]:
         "target_scaler": TARGET_SCALER,
         "metric_standard": METRIC_STANDARD,
         "metric_threshold": METRIC_THRESHOLD,
+        "confusion_matrix_threshold": CONFUSION_MATRIX_THRESHOLD,
         "model_type": MODEL_TYPE,
         "empty_graph": EMPTY_GRAPH,
         "k_neighbors": K_NEIGHBORS,
@@ -489,6 +494,7 @@ def run_experiment(
         config,
         metric_standard=normalize_metric_standard(config.metric_standard),
         metric_threshold=validate_metric_threshold(config.metric_threshold),
+        confusion_matrix_threshold=validate_metric_threshold(config.confusion_matrix_threshold),
         station_similarity=normalize_station_similarity(config.station_similarity),
     )
     if config.learn_std and config.model_type.lower().strip() != "glstm":
@@ -594,6 +600,10 @@ def run_experiment(
     )
     metric_threshold_target_scale = metric_threshold_in_target_scale(
         config.metric_threshold,
+        scaling_state.target_scaler,
+    )
+    confusion_matrix_threshold_target_scale = metric_threshold_in_target_scale(
+        config.confusion_matrix_threshold,
         scaling_state.target_scaler,
     )
     tensor_splits = to_torch_window_splits(scaled_windowed)
@@ -723,11 +733,6 @@ def run_experiment(
         metric_threshold_mm=config.metric_threshold,
         learn_std=config.learn_std,
     )
-    test_metrics["metric_units"] = (
-        "normalized_target" if scaling_state.target_scaler is not None else "mm"
-    )
-    _write_json(logs_dir / "test_metrics.json", test_metrics)
-
     collected_predictions = collect_model_predictions(
         trained_model,
         test_loader,
@@ -738,6 +743,20 @@ def run_experiment(
     else:
         y_pred_test = collected_predictions
         predicted_node_std_test = None
+    test_metrics.update(
+        numpy_rain_classification_metrics(
+            tensor_splits.y_test,
+            y_pred_test,
+            threshold=confusion_matrix_threshold_target_scale,
+        )
+    )
+    test_metrics["confusion_matrix_threshold_mm"] = config.confusion_matrix_threshold
+    test_metrics["confusion_matrix_threshold_target_scale"] = confusion_matrix_threshold_target_scale
+    test_metrics["metric_units"] = (
+        "normalized_target" if scaling_state.target_scaler is not None else "mm"
+    )
+    _write_json(logs_dir / "test_metrics.json", test_metrics)
+
     save_prediction_outputs(
         run_dir,
         tensor_splits.y_test,
@@ -749,6 +768,7 @@ def run_experiment(
         edge_index=edge_index,
         metric_standard=config.metric_standard,
         metric_threshold=config.metric_threshold,
+        confusion_matrix_threshold=config.confusion_matrix_threshold,
         predicted_node_std=predicted_node_std_test,
     )
     if scaling_state.target_scaler is not None:
