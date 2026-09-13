@@ -8,3 +8,7 @@ __pycache__/
 *.pyc
 !Datasets/raw/.gitkeep
 !Datasets/processed/.gitkeep
+Dataset_Plots/
+audiction/
+Seminar_GLSTM/
+tmp/
